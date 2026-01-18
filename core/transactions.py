@@ -106,7 +106,7 @@ def _transactions_df() -> pd.DataFrame:
     conn = get_connection()
     df = pd.read_sql_query(
         """
-        SELECT t.*, a.ticker, a.currency AS asset_currency
+        SELECT t.*, a.ticker AS asset_ticker, a.currency AS asset_currency
         FROM transactions t
         JOIN assets a ON a.id = t.asset_id
         ORDER BY t.trade_date, t.id
@@ -187,9 +187,13 @@ def rebuild_holdings_from_transactions() -> pd.DataFrame:
     tx["_thb_notional"] = tx.apply(lambda r: _thb_notional_for_row(r, fallback_fx), axis=1)
 
     results = []
-    for (ticker, broker), g in tx.groupby(["ticker", "broker"]):
+    # Group by asset_id instead of ticker string to support manual edits/merges in DB
+    for (asset_id, broker), g in tx.groupby(["asset_id", "broker"]):
         qty = 0.0
         avg_thb = 0.0
+        # Get ticker from the group (all have same ticker from assets table)
+        ticker = g["asset_ticker"].iloc[0]
+        
         for _, r in g.sort_values(["trade_date", "id"]).iterrows():
             side = str(r["side"]).lower().strip()
             q = float(r["quantity"]) if pd.notna(r["quantity"]) else 0.0
@@ -204,24 +208,28 @@ def rebuild_holdings_from_transactions() -> pd.DataFrame:
                     qty = new_qty
             elif side == "sell":
                 qty = max(0.0, qty - q)
-        results.append({"ticker": ticker, "broker": broker, "quantity": qty, "avg_cost_thb_per_unit": avg_thb})
+        results.append({
+            "asset_id": int(asset_id), 
+            "ticker": ticker, 
+            "broker": broker, 
+            "quantity": qty, 
+            "avg_cost_thb_per_unit": avg_thb
+        })
 
     pos = pd.DataFrame(results)
 
     # sync holdings table
     conn = get_connection()
     cur = conn.cursor()
+    # TRUNCATE holdings before rebuilding to ensure no orphans remain
+    cur.execute("DELETE FROM holdings")
+    
     for _, row in pos.iterrows():
-        cur.execute("SELECT id FROM assets WHERE ticker = ?", (row["ticker"],))
-        a = cur.fetchone()
-        if not a:
-            continue
-        asset_id = a[0]
-        cur.execute("DELETE FROM holdings WHERE asset_id = ? AND broker = ?", (asset_id, row["broker"]))
+        # Insert directly using asset_id since we already have it
         if row["quantity"] > 0:
             cur.execute(
                 "INSERT INTO holdings (asset_id, broker, quantity, avg_price, currency) VALUES (?, ?, ?, ?, 'THB')",
-                (asset_id, row["broker"], float(row["quantity"]), float(row["avg_cost_thb_per_unit"]))
+                (row["asset_id"], row["broker"], float(row["quantity"]), float(row["avg_cost_thb_per_unit"]))
             )
     conn.commit()
     conn.close()

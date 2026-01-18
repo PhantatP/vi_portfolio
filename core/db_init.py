@@ -32,9 +32,14 @@ CREATE TABLE IF NOT EXISTS transactions (
     trade_date TEXT NOT NULL,       -- YYYY-MM-DD
     side TEXT NOT NULL,             -- buy / sell
     quantity REAL NOT NULL,
-    price REAL NOT NULL,
+    price REAL,                     -- per-share price
     fee REAL DEFAULT 0,
-    currency TEXT NOT NULL,
+    currency TEXT,                  -- legacy mirror
+    price_ccy TEXT,
+    thb_amount REAL,
+    usd_amount REAL,
+    fx_thb_per_usd REAL,
+    fee_ccy TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
 );
