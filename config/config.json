@@ -1,0 +1,14 @@
+{
+  "target_allocations": {
+    "country": {
+      "US": 0.4,
+      "TH": 0.3,
+      "OTHER": 0.3
+    },
+    "tag": {
+      "growth": 0.7,
+      "dividend": 0.3
+    },
+    "btc_max": 0.1
+  }
+}

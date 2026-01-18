@@ -1,0 +1,16 @@
+*.pyc
+.env   
+__pycache__
+.venv
+.env.example
+.env.local
+.env.prod
+.env.test
+.env.dev
+.db
+.env.prod.local
+.env.test.local
+.env.dev.local
+.env.prod.example
+.env.test.example
+.env.dev.example
