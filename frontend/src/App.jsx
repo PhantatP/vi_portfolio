@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LayoutDashboard, Briefcase, PieChart, Search, Settings, ArrowUpRight, Menu, RefreshCw, ChevronRight, Plus, X } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -577,60 +577,201 @@ const ManualForm = ({ onClose, onSuccess }) => {
   );
 };
 
+// ── Shared editable transaction table (module-level to avoid remount on rerender) ──
+const TxTable = React.memo(({ rows, showBadge, onField }) => {
+  const ci = { background: 'transparent', border: 'none', outline: 'none', color: '#e8e8ea', fontSize: 13, fontFamily: 'inherit' };
+  return (
+    <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+            {['', ...(showBadge ? ['Src'] : []), 'Ticker', 'Side', 'Qty', 'Price', 'Total', 'Ccy', 'Date'].map(h => (
+              <th key={h} style={{ padding: '9px 10px', textAlign: 'left', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#555558', whiteSpace: 'nowrap' }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={r._rowKey || i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', opacity: r.selected ? 1 : 0.4, background: r._isDup ? 'rgba(251,146,60,0.06)' : 'transparent' }}>
+              <td style={{ padding: '7px 10px' }}>
+                <input type="checkbox" checked={r.selected} onChange={e => onField(r._batchId, r._rowIdx, 'selected', e.target.checked)} style={{ cursor: 'pointer', accentColor: '#d4ff00' }} />
+              </td>
+              {showBadge && (
+                <td style={{ padding: '7px 6px' }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', color: '#888890' }}>P{(r._batchIdx ?? 0) + 1}</span>
+                </td>
+              )}
+              <td style={{ padding: '7px 10px' }}>
+                {r._dbDup && <span title="Already in database" style={{ marginRight: 4, color: '#f87171', fontSize: 11, fontWeight: 700 }}>DB</span>}
+                {r._isDup && !r._dbDup && <span title="Duplicate in this scan" style={{ marginRight: 4, color: '#fb923c', fontSize: 12 }}>⚠</span>}
+                <input style={{ ...ci, fontWeight: 600, width: 80 }} value={r.ticker} onChange={e => onField(r._batchId, r._rowIdx, 'ticker', e.target.value.toUpperCase())} />
+              </td>
+              <td style={{ padding: '7px 10px' }}>
+                <select value={r.side} onChange={e => onField(r._batchId, r._rowIdx, 'side', e.target.value)}
+                  style={{ ...ci, width: 72, cursor: 'pointer', background: '#18181c', border: 'none',
+                    color: r.side === 'buy' ? '#4ade80' : r.side === 'sell' ? '#f87171' : r.side === 'dividend' ? '#a78bfa' : '#fb923c' }}>
+                  {[['buy','#4ade80'],['sell','#f87171'],['dividend','#a78bfa'],['tax','#fb923c']].map(([v,c]) => (
+                    <option key={v} value={v} style={{ color: c, background: '#18181c' }}>{v}</option>
+                  ))}
+                </select>
+              </td>
+              <td style={{ padding: '7px 10px' }}>
+                <input type="number" style={{ ...ci, width: 60 }} value={r.quantity} onChange={e => onField(r._batchId, r._rowIdx, 'quantity', e.target.value)} />
+              </td>
+              <td style={{ padding: '7px 10px' }}>
+                <input type="number" style={{ ...ci, width: 72 }} value={r.price} onChange={e => onField(r._batchId, r._rowIdx, 'price', e.target.value)} />
+              </td>
+              <td style={{ padding: '7px 10px' }}>
+                <input type="number" style={{ ...ci, width: 80 }} value={r.total_amount} onChange={e => onField(r._batchId, r._rowIdx, 'total_amount', e.target.value)} />
+              </td>
+              <td style={{ padding: '7px 10px' }}>
+                <select value={r.amount_currency || 'THB'} onChange={e => onField(r._batchId, r._rowIdx, 'amount_currency', e.target.value)}
+                  style={{ ...ci, width: 52, cursor: 'pointer', color: '#888890', background: '#18181c', border: 'none', fontSize: 12 }}>
+                  <option value="THB" style={{ background: '#18181c' }}>THB</option>
+                  <option value="USD" style={{ background: '#18181c' }}>USD</option>
+                </select>
+              </td>
+              <td style={{ padding: '7px 10px' }}>
+                <input type="date" style={{ ...ci, width: 130, fontSize: 12, colorScheme: 'dark' }} value={r.trade_date || ''} onChange={e => onField(r._batchId, r._rowIdx, 'trade_date', e.target.value)} />
+              </td>
+            </tr>
+          ))}
+          {rows.length === 0 && (
+            <tr><td colSpan={showBadge ? 9 : 8} style={{ padding: '24px', textAlign: 'center', fontSize: 13, color: '#555558' }}>No transactions found</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+});
+
 // ── OCR / Photo scan form ──
 const ScanPhotoForm = ({ onClose, onSuccess }) => {
-  const [rows, setRows] = useState(null);
-  const [scanning, setScanning] = useState(false);
+  // batches: [{ id, file, imageUrl, status: pending|scanning|done|error, rows: [], error }]
+  const [batches, setBatches] = useState([]);
+  const [focusedId, setFocusedId] = useState(null);
+  const [viewMode, setViewMode] = useState('photo'); // 'photo' | 'all'
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState('');
   const [dragOver, setDragOver] = useState(false);
-  const [imageUrl, setImageUrl] = useState(null);
+  const fileInputRef = useRef(null);
+  const urlsRef = useRef([]);
+  const abortRef = useRef(null);
 
+  useEffect(() => () => {
+    urlsRef.current.forEach(u => URL.revokeObjectURL(u));
+    abortRef.current?.abort();
+  }, []);
+
+  const handleClose = () => {
+    abortRef.current?.abort();
+    onClose();
+  };
+
+  // Auto-reset focusedId if that batch is removed
   useEffect(() => {
-    return () => { if (imageUrl) URL.revokeObjectURL(imageUrl); };
-  }, [imageUrl]);
+    if (!batches.find(b => b.id === focusedId) && batches.length > 0) {
+      setFocusedId(batches[0].id);
+    }
+  }, [batches, focusedId]);
 
-  const processFile = async (file) => {
-    if (!file) return;
-    // Create preview URL before async OCR
-    const url = URL.createObjectURL(file);
-    if (imageUrl) URL.revokeObjectURL(imageUrl);
-    setImageUrl(url);
-    setError(''); setScanning(true); setRows(null);
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await api.post('/ocr/parse', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      const parsed = (res.data.transactions || []).filter(t => t.side === 'buy' || t.side === 'sell');
-      if (parsed.length === 0) { setError('No buy/sell transactions found in image.'); }
-      else { setRows(parsed.map(t => ({ ...t, broker: 'Dime', fee: 0, selected: true }))); }
-    } catch (e) {
-      setError(e.response?.data?.detail || 'OCR failed. Try a clearer screenshot.');
-    } finally { setScanning(false); }
+  const processFiles = async (fileList) => {
+    const files = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+    if (!files.length) return;
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const newBatches = files.map(file => {
+      const imageUrl = URL.createObjectURL(file);
+      urlsRef.current.push(imageUrl);
+      return { id: Math.random().toString(36).slice(2), file, imageUrl, status: 'pending', rows: [], error: null };
+    });
+
+    setBatches(prev => [...prev, ...newBatches]);
+    setFocusedId(newBatches[0].id);
+    setViewMode('photo');
+
+    for (const batch of newBatches) {
+      if (controller.signal.aborted) break;
+      setBatches(prev => prev.map(b => b.id === batch.id ? { ...b, status: 'scanning' } : b));
+      try {
+        const fd = new FormData();
+        fd.append('file', batch.file);
+        const res = await api.post('/ocr/parse', fd, { headers: { 'Content-Type': 'multipart/form-data' }, signal: controller.signal });
+        const parsed = (res.data.transactions || [])
+          .filter(t => ['buy','sell','dividend','tax'].includes(t.side))
+          .map((t, idx) => ({ ...t, broker: 'Dime', fee: 0, selected: true, _rowKey: `${batch.id}-${idx}`, _batchId: batch.id, _rowIdx: idx, _dbDup: false }));
+
+        // Check immediately against DB — targeted queries only for this batch's transactions
+        try {
+          const checkItems = parsed
+            .filter(t => t.trade_date)
+            .map(t => ({ ticker: t.ticker, side: t.side, trade_date: t.trade_date }));
+          if (checkItems.length > 0) {
+            const chk = await api.post('/transactions/exists', checkItems);
+            const existingSet = new Set(chk.data.existing);
+            parsed.forEach(t => {
+              if (existingSet.has(`${t.ticker}|${t.side}|${t.trade_date}`)) t._dbDup = true;
+            });
+          }
+        } catch (_) { /* non-critical */ }
+
+        setBatches(prev => prev.map(b => b.id === batch.id ? { ...b, status: 'done', rows: parsed } : b));
+      } catch (e) {
+        if (e.code === 'ERR_CANCELED' || e.name === 'CanceledError') break;
+        setBatches(prev => prev.map(b => b.id === batch.id ? { ...b, status: 'error', error: e.response?.data?.detail || 'OCR failed' } : b));
+      }
+    }
   };
 
-  const resetScan = () => {
-    setRows(null); setError('');
-    if (imageUrl) { URL.revokeObjectURL(imageUrl); setImageUrl(null); }
-  };
+  const removeBatch = (id) => setBatches(prev => prev.filter(b => b.id !== id));
 
-  const handleDrop = (e) => { e.preventDefault(); setDragOver(false); processFile(e.dataTransfer.files[0]); };
-  const handleFileInput = (e) => processFile(e.target.files[0]);
-  const setRowField = (i, k, v) => setRows(prev => prev.map((r, idx) => idx === i ? { ...r, [k]: v } : r));
+  const onField = useCallback((batchId, rowIdx, key, val) => {
+    setBatches(prev => prev.map(b => b.id === batchId
+      ? { ...b, rows: b.rows.map((r, i) => i === rowIdx ? { ...r, [key]: val } : r) }
+      : b));
+  }, []);
+
+  // All rows with duplicate flags (later occurrences of same ticker+side+date+qty are flagged)
+  const allRows = useMemo(() => {
+    const flat = [];
+    batches.filter(b => b.status === 'done').forEach((b, bIdx) => {
+      b.rows.forEach(r => flat.push({ ...r, _batchIdx: bIdx }));
+    });
+    const seen = new Set();
+    return flat.map(r => {
+      const key = `${r.ticker}|${r.side}|${r.trade_date}|${Number(r.quantity).toFixed(4)}`;
+      const sessionDup = seen.has(key);
+      if (!sessionDup) seen.add(key);
+      return { ...r, _isDup: sessionDup || !!r._dbDup };
+    });
+  }, [batches]);
+
+  const doneCount = batches.filter(b => b.status === 'done').length;
+  const dupCount = allRows.filter(r => r._isDup).length;
+  const importableCount = allRows.filter(r => r.selected && !r._isDup).length;
+  const focusedBatch = batches.find(b => b.id === focusedId);
+  const focusedBatchIdx = batches.findIndex(b => b.id === focusedId);
+  const hasBatches = batches.length > 0;
 
   const handleImport = async () => {
-    const selected = rows.filter(r => r.selected);
-    if (selected.length === 0) { setError('Select at least one transaction.'); return; }
+    const toImport = allRows.filter(r => r.selected && !r._isDup);
+    if (toImport.length === 0) { setError('No non-duplicate transactions selected.'); return; }
     setError(''); setImporting(true);
     try {
       await api.post('/ocr/import', {
-        transactions: selected.map(r => ({
-          ticker: r.ticker, side: r.side, quantity: Number(r.quantity),
-          price_per_share: r.price ? Number(r.price) : null,
-          price_ccy: r.price_currency || 'USD', broker: r.broker || 'Dime',
-          trade_date: r.trade_date, fee: Number(r.fee) || 0,
-          thb_amount: r.total_amount ? Number(r.total_amount) : null,
-        })),
+        transactions: toImport.map(r => {
+          const isUsd = (r.amount_currency || 'THB') === 'USD';
+          const total = r.total_amount ? Number(r.total_amount) : null;
+          return {
+            ticker: r.ticker, side: r.side, quantity: Number(r.quantity),
+            price_per_share: r.price ? Number(r.price) : null,
+            price_ccy: r.price_currency || 'USD', broker: r.broker || 'Dime',
+            trade_date: r.trade_date, fee: Number(r.fee) || 0,
+            thb_amount: isUsd ? null : total, usd_amount: isUsd ? total : null,
+          };
+        }),
       });
       onSuccess(); onClose();
     } catch (e) {
@@ -638,115 +779,141 @@ const ScanPhotoForm = ({ onClose, onSuccess }) => {
     } finally { setImporting(false); }
   };
 
-  const cellInput = { background: 'transparent', border: 'none', outline: 'none', color: '#e8e8ea', fontSize: 13, width: '100%', fontFamily: 'inherit' };
-
-  // Side-by-side layout when image + results are ready
-  const showSplit = imageUrl && (rows || scanning);
-
   return (
-    <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: hasBatches ? 560 : 'auto' }}>
 
-      {/* Drop zone — only shown when no image yet */}
-      {!imageUrl && (
-        <div
-          onDrop={handleDrop} onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}
-          onClick={() => document.getElementById('ocr-file-input').click()}
-          style={{ border: `2px dashed ${dragOver ? '#d4ff00' : 'rgba(255,255,255,0.12)'}`, borderRadius: 12, padding: '40px 24px', textAlign: 'center', cursor: 'pointer', transition: 'border-color 0.15s', background: dragOver ? 'rgba(212,255,0,0.03)' : 'transparent' }}>
-          <input id="ocr-file-input" type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} onChange={handleFileInput} />
-          <div style={{ fontSize: 28, marginBottom: 10 }}>📸</div>
-          <p style={{ fontSize: 14, fontWeight: 600, color: '#e8e8ea', marginBottom: 4 }}>Drop a Dime screenshot here</p>
-          <p style={{ fontSize: 12, color: '#555558' }}>PNG or JPG — or click to browse</p>
+      {/* Drop zone — no batches yet */}
+      {!hasBatches && (
+        <div style={{ padding: '20px 24px' }}>
+          <div
+            onDrop={e => { e.preventDefault(); setDragOver(false); processFiles(e.dataTransfer.files); }}
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}
+            onClick={() => fileInputRef.current?.click()}
+            style={{ border: `2px dashed ${dragOver ? '#d4ff00' : 'rgba(255,255,255,0.12)'}`, borderRadius: 12, padding: '48px 24px', textAlign: 'center', cursor: 'pointer', transition: 'border-color 0.15s', background: dragOver ? 'rgba(212,255,0,0.03)' : 'transparent' }}>
+            <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => processFiles(e.target.files)} />
+            <div style={{ fontSize: 32, marginBottom: 10 }}>📸</div>
+            <p style={{ fontSize: 14, fontWeight: 600, color: '#e8e8ea', marginBottom: 4 }}>Drop Dime screenshots here</p>
+            <p style={{ fontSize: 12, color: '#555558' }}>Multiple PNG/JPG files — or click to browse</p>
+          </div>
         </div>
       )}
 
-      {/* Split view: image preview + results */}
-      {showSplit && (
-        <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 16, alignItems: 'start' }}>
-          {/* Photo panel */}
-          <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
-            <div style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#555558' }}>Source</span>
-              <button onClick={resetScan} style={{ fontSize: 11, color: '#555558', background: 'transparent', border: 'none', cursor: 'pointer' }}
-                className="hover:text-white transition-colors">Rescan</button>
+      {/* Review layout */}
+      {hasBatches && (
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+
+          {/* Left: photo strip */}
+          <div style={{ width: 130, borderRight: '1px solid rgba(255,255,255,0.07)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+            <div style={{ padding: '10px 10px 6px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#555558', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>Photos</div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px 4px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {batches.map((b, i) => (
+                <div key={b.id} style={{ position: 'relative' }}>
+                  <button onClick={() => { setFocusedId(b.id); setViewMode('photo'); }}
+                    style={{ width: '100%', borderRadius: 8, overflow: 'hidden', border: `1px solid ${focusedId === b.id && viewMode === 'photo' ? '#d4ff00' : 'rgba(255,255,255,0.08)'}`, cursor: 'pointer', background: 'transparent', padding: 0, display: 'block', textAlign: 'left' }}>
+                    <img src={b.imageUrl} style={{ width: '100%', height: 70, objectFit: 'cover', display: 'block' }} />
+                    <div style={{ padding: '4px 8px', background: '#0f0f11', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 10, color: '#888890' }}>P{i + 1}</span>
+                      {b.status === 'scanning' && <RefreshCw size={10} color="#d4ff00" className="animate-spin" />}
+                      {b.status === 'done' && <span style={{ fontSize: 10, color: '#4ade80' }}>✓{b.rows.length}</span>}
+                      {b.status === 'error' && <span style={{ fontSize: 10, color: '#f87171' }}>✗</span>}
+                    </div>
+                  </button>
+                  <button onClick={() => removeBatch(b.id)}
+                    style={{ position: 'absolute', top: 3, right: 3, width: 16, height: 16, borderRadius: 4, background: 'rgba(0,0,0,0.7)', border: 'none', color: '#888890', cursor: 'pointer', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1 }}>×</button>
+                </div>
+              ))}
+              <button onClick={() => fileInputRef.current?.click()}
+                style={{ borderRadius: 8, border: '1px dashed rgba(255,255,255,0.12)', padding: '7px 0', fontSize: 11, color: '#555558', cursor: 'pointer', background: 'transparent', width: '100%' }}>
+                + Add
+              </button>
+              <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => processFiles(e.target.files)} />
             </div>
-            <img src={imageUrl} alt="Uploaded screenshot"
-              style={{ width: '100%', display: 'block', maxHeight: 480, objectFit: 'contain', background: '#0c0c0e' }} />
+            {/* All view button */}
+            {doneCount > 0 && (
+              <button onClick={() => setViewMode('all')}
+                style={{ margin: '6px 8px 8px', padding: '7px 8px', borderRadius: 8, border: `1px solid ${viewMode === 'all' ? '#d4ff00' : 'rgba(255,255,255,0.08)'}`, background: viewMode === 'all' ? 'rgba(212,255,0,0.08)' : 'transparent', color: viewMode === 'all' ? '#d4ff00' : '#888890', fontSize: 11, fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>
+                All ({allRows.length}){dupCount > 0 && <span style={{ color: '#fb923c', marginLeft: 4 }}>⚠{dupCount}</span>}
+              </button>
+            )}
           </div>
 
-          {/* Results panel */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-            {scanning ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '48px 0' }}>
-                <RefreshCw size={20} color="#d4ff00" className="animate-spin" />
-                <p style={{ fontSize: 13, color: '#888890' }}>Reading image with OCR…</p>
-              </div>
-            ) : rows && (
+          {/* Right: content */}
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+
+            {/* Photo view */}
+            {viewMode === 'photo' && focusedBatch && (
               <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <p style={{ fontSize: 13, fontWeight: 600, color: '#e8e8ea' }}>{rows.length} transaction{rows.length !== 1 ? 's' : ''} detected</p>
-                  <button onClick={() => { /* allow re-upload while keeping split */ document.getElementById('ocr-file-input-split').click(); }}
-                    style={{ fontSize: 12, color: '#888890', background: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
-                    Scan another
-                  </button>
-                  <input id="ocr-file-input-split" type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} onChange={handleFileInput} />
+                {/* Photo preview */}
+                <div style={{ width: 210, borderRight: '1px solid rgba(255,255,255,0.07)', display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
+                  <div style={{ padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#555558', flexShrink: 0 }}>
+                    Photo {focusedBatchIdx + 1}
+                  </div>
+                  <div style={{ flex: 1, overflowY: 'auto' }}>
+                    <img src={focusedBatch.imageUrl} alt="Source" style={{ width: '100%', display: 'block', objectFit: 'contain', background: '#0c0c0e' }} />
+                  </div>
                 </div>
 
-                <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-                        {['', 'Ticker', 'Side', 'Qty', 'Price', 'THB Total', 'Date'].map(h => (
-                          <th key={h} style={{ padding: '9px 10px', textAlign: 'left', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#555558', whiteSpace: 'nowrap' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((r, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', opacity: r.selected ? 1 : 0.4 }}>
-                          <td style={{ padding: '7px 10px' }}>
-                            <input type="checkbox" checked={r.selected} onChange={e => setRowField(i, 'selected', e.target.checked)} style={{ cursor: 'pointer', accentColor: '#d4ff00' }} />
-                          </td>
-                          <td style={{ padding: '7px 10px' }}>
-                            <input style={{ ...cellInput, fontWeight: 600, width: 80 }} value={r.ticker} onChange={e => setRowField(i, 'ticker', e.target.value.toUpperCase())} />
-                          </td>
-                          <td style={{ padding: '7px 10px' }}>
-                            <select value={r.side} onChange={e => setRowField(i, 'side', e.target.value)}
-                              style={{ ...cellInput, width: 52, cursor: 'pointer', color: r.side === 'buy' ? '#4ade80' : '#f87171', background: '#18181c', border: 'none' }}>
-                              <option value="buy" style={{ color: '#4ade80', background: '#18181c' }}>buy</option>
-                              <option value="sell" style={{ color: '#f87171', background: '#18181c' }}>sell</option>
-                            </select>
-                          </td>
-                          <td style={{ padding: '7px 10px' }}>
-                            <input type="number" style={{ ...cellInput, width: 60 }} value={r.quantity} onChange={e => setRowField(i, 'quantity', e.target.value)} />
-                          </td>
-                          <td style={{ padding: '7px 10px' }}>
-                            <input type="number" style={{ ...cellInput, width: 72 }} value={r.price} onChange={e => setRowField(i, 'price', e.target.value)} />
-                          </td>
-                          <td style={{ padding: '7px 10px' }}>
-                            <input type="number" style={{ ...cellInput, width: 80 }} value={r.total_amount} onChange={e => setRowField(i, 'total_amount', e.target.value)} />
-                          </td>
-                          <td style={{ padding: '7px 10px', color: '#888890', whiteSpace: 'nowrap', fontSize: 12 }}>{r.trade_date}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                {/* Transactions for this photo */}
+                <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {focusedBatch.status === 'scanning' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, paddingTop: 60 }}>
+                      <RefreshCw size={20} color="#d4ff00" className="animate-spin" />
+                      <p style={{ fontSize: 13, color: '#888890' }}>Reading image…</p>
+                    </div>
+                  )}
+                  {focusedBatch.status === 'error' && (
+                    <p style={{ fontSize: 13, color: '#f87171', padding: '10px 14px', background: 'rgba(248,113,113,0.08)', borderRadius: 8, border: '1px solid rgba(248,113,113,0.15)' }}>{focusedBatch.error}</p>
+                  )}
+                  {focusedBatch.status === 'done' && (() => {
+                    const batchRows = allRows.filter(r => r._batchId === focusedBatch.id);
+                    return (
+                      <>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: '#e8e8ea' }}>{batchRows.length} transaction{batchRows.length !== 1 ? 's' : ''} detected</p>
+                        <TxTable rows={batchRows} showBadge={false} onField={onField} />
+                      </>
+                    );
+                  })()}
                 </div>
               </>
+            )}
+
+            {/* All view */}
+            {viewMode === 'all' && (
+              <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: '#e8e8ea' }}>{allRows.length} total transactions</p>
+                  {dupCount > 0 && (() => {
+                    const dbDupCount = allRows.filter(r => r._dbDup).length;
+                    const sessionDupCount = dupCount - dbDupCount;
+                    return (
+                      <span style={{ fontSize: 12, color: '#fb923c', padding: '3px 10px', background: 'rgba(251,146,60,0.08)', borderRadius: 6, border: '1px solid rgba(251,146,60,0.2)' }}>
+                        {dbDupCount > 0 && <span style={{ color: '#f87171' }}><b>DB</b> {dbDupCount} already imported</span>}
+                        {dbDupCount > 0 && sessionDupCount > 0 && '  ·  '}
+                        {sessionDupCount > 0 && <span>⚠ {sessionDupCount} duplicate{sessionDupCount !== 1 ? 's' : ''} in scan</span>}
+                        {' — skipped on import'}
+                      </span>
+                    );
+                  })()}
+                </div>
+                <TxTable rows={allRows} showBadge={true} onField={onField} />
+              </div>
             )}
           </div>
         </div>
       )}
 
-      {error && <p style={{ fontSize: 13, color: '#f87171', padding: '10px 14px', background: 'rgba(248,113,113,0.08)', borderRadius: 8, border: '1px solid rgba(248,113,113,0.15)' }}>{error}</p>}
-
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
-        <button onClick={onClose} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)', background: 'transparent', color: '#888890', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-        {rows && (
-          <button onClick={handleImport} disabled={importing}
-            style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: importing ? 'rgba(212,255,0,0.5)' : '#d4ff00', color: '#000', fontSize: 13, fontWeight: 700, cursor: importing ? 'not-allowed' : 'pointer' }}>
-            {importing ? 'Importing…' : `Import ${rows.filter(r=>r.selected).length} Trade${rows.filter(r=>r.selected).length !== 1 ? 's' : ''}`}
-          </button>
-        )}
+      {/* Footer */}
+      <div style={{ padding: '12px 20px', borderTop: hasBatches ? '1px solid rgba(255,255,255,0.07)' : 'none', display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
+        {error && <p style={{ fontSize: 13, color: '#f87171', padding: '10px 14px', background: 'rgba(248,113,113,0.08)', borderRadius: 8, border: '1px solid rgba(248,113,113,0.15)' }}>{error}</p>}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={handleClose} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)', background: 'transparent', color: '#888890', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          {doneCount > 0 && (
+            <button onClick={handleImport} disabled={importing}
+              style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: importing ? 'rgba(212,255,0,0.5)' : '#d4ff00', color: '#000', fontSize: 13, fontWeight: 700, cursor: importing ? 'not-allowed' : 'pointer' }}>
+              {importing ? 'Importing…' : `Import ${importableCount} Trade${importableCount !== 1 ? 's' : ''}`}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -767,7 +934,7 @@ const AddTransactionModal = ({ onClose, onSuccess }) => {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 24 }}>
       <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={{ duration: 0.15 }}
-        style={{ background: '#18181c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, width: '100%', maxWidth: tab === 'scan' ? 860 : 480, maxHeight: '90vh', overflowY: 'auto' }}>
+        style={{ background: '#18181c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, width: '100%', maxWidth: tab === 'scan' ? 960 : 480, maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
         {/* Header */}
         <div style={{ padding: '18px 24px', borderBottom: '1px solid rgba(255,255,255,0.07)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -780,7 +947,7 @@ const AddTransactionModal = ({ onClose, onSuccess }) => {
         </div>
 
         <AnimatePresence mode="wait">
-          <motion.div key={tab} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }}>
+          <motion.div key={tab} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }} style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             {tab === 'manual'
               ? <ManualForm onClose={onClose} onSuccess={onSuccess} />
               : <ScanPhotoForm onClose={onClose} onSuccess={onSuccess} />}

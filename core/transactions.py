@@ -43,8 +43,8 @@ def add_transaction(
     ticker: str,
     broker: str,
     trade_date: str,            # "YYYY-MM-DD"
-    side: str,                  # "buy" / "sell"
-    quantity: float,
+    side: str,                  # "buy" / "sell" / "dividend" / "tax"
+    quantity: float = 0.0,
     price_per_share: float = None,   # per-share price (USD for US stocks/ETFs typically)
     price_ccy: str = "USD",          # currency of price_per_share
     fee: float = 0.0,
@@ -58,8 +58,8 @@ def add_transaction(
     Stores both per-share price (in price_ccy) and optional THB total.
     """
     side = side.lower().strip()
-    if side not in ("buy", "sell"):
-        raise ValueError("side must be 'buy' or 'sell'")
+    if side not in ("buy", "sell", "dividend", "tax"):
+        raise ValueError("side must be 'buy', 'sell', 'dividend', or 'tax'")
 
     # ensure asset row first
     upsert_asset_if_missing(ticker, currency=price_ccy)

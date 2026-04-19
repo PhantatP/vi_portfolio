@@ -81,13 +81,12 @@ def parse_thai_date(date_str):
     return f"{ad_year}-{month:02d}-{day:02d}"
 
 def clean_number(s):
-    # Remove commas, fix 'o' -> '0', 'l' -> '1'?
-    s = s.replace(",", "")
-    s = s.replace("o", "0").replace("O", "0")
-    # Extract first float
+    s = s.replace(",", "").replace("o", "0").replace("O", "0")
+    negative = s.strip().startswith("-")
     m = re.search(r"(\d+\.?\d*)", s)
     if m:
-        return float(m.group(1))
+        val = float(m.group(1))
+        return -val if negative else val
     return None
 
 def get_reader():
@@ -113,11 +112,10 @@ def parse_dime_image(image_input):
     for i, line in enumerate(results):
         line = line.strip()
         
-        # 0. Skip Month Headers (e.g. "กุมภาพันธ์ 2568")
-        # If line contains just a Thai month and Year, skip
-        if any(m in line for m in THAI_MONTHS_MAP.keys()) and re.search(r"\d{4}", line):
-             # Likely a section header
-             continue
+        # 0. Skip Month Headers (e.g. "มกราคม 2569") — but NOT transaction lines
+        # A header is: has Thai month key AND a 4-digit year AND no English ticker-like word
+        if any(m in line for m in THAI_MONTHS_MAP.keys()) and re.search(r"\d{4}", line) and not re.search(r"[A-Z]{1,5}", line):
+            continue
 
         # 1. Detect Header: "ซื้อ/ขาย/ปันผล/ภาษี TICKER"
         # Typos: ซื้อ, ซื่อ, ขื่อ, ขาย, ปันผล, ภาษี, ปืนผล

@@ -1,8 +1,9 @@
-from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi import FastAPI, HTTPException, File, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date as dt_date
+import math
 import pandas as pd
 import sys
 import os
@@ -14,6 +15,19 @@ from core.portfolio import build_portfolio_view_thb, get_holdings_df
 from core.analysis import get_rebalancing_needs, get_hierarchical_distribution, get_smart_picks, get_all_sector_peers
 from core.research import get_basic_info, get_price_history, get_income_funnel
 from core.transactions import add_transaction, rebuild_holdings_from_transactions, upsert_asset_if_missing
+
+def _clean(obj):
+    """Recursively replace NaN/inf with None so JSON serialization never fails."""
+    if isinstance(obj, float):
+        return None if (math.isnan(obj) or math.isinf(obj)) else obj
+    if isinstance(obj, dict):
+        return {k: _clean(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_clean(v) for v in obj]
+    return obj
+
+def _df_records(df: pd.DataFrame):
+    return _clean(df.to_dict(orient="records"))
 
 app = FastAPI(title="VI Portfolio API")
 
@@ -41,10 +55,10 @@ def get_dashboard():
         total_profit = df["unrealized_pl_thb"].sum()
         
         # Mini stats
-        top_gainer = df.nlargest(1, 'unrealized_pl_pct').iloc[0].to_dict() if not df.empty else None
-        worst_loser = df.nsmallest(1, 'unrealized_pl_pct').iloc[0].to_dict() if not df.empty else None
-        
-        return {
+        top_gainer = _clean(df.nlargest(1, 'unrealized_pl_pct').iloc[0].to_dict()) if not df.empty else None
+        worst_loser = _clean(df.nsmallest(1, 'unrealized_pl_pct').iloc[0].to_dict()) if not df.empty else None
+
+        return _clean({
             "total_val": total_val,
             "total_cost": total_cost,
             "total_profit": total_profit,
@@ -52,7 +66,7 @@ def get_dashboard():
             "top_gainer": top_gainer,
             "worst_loser": worst_loser,
             "allocation": df.set_index("ticker")["value_thb"].to_dict()
-        }
+        })
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -60,7 +74,7 @@ def get_dashboard():
 def get_holdings():
     try:
         df, _ = build_portfolio_view_thb()
-        return df.to_dict(orient="records")
+        return _df_records(df)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -68,7 +82,7 @@ def get_holdings():
 def get_distribution():
     try:
         df = get_hierarchical_distribution()
-        return df.to_dict(orient="records")
+        return _df_records(df)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -76,7 +90,7 @@ def get_distribution():
 def get_rebalance():
     try:
         df = get_rebalancing_needs()
-        return df.to_dict(orient="records")
+        return _df_records(df)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -92,7 +106,7 @@ def get_sectors():
 def get_stock_research(ticker: str):
     try:
         info = get_basic_info(ticker)
-        history = get_price_history(ticker).to_dict(orient="records")
+        history = _df_records(get_price_history(ticker))
         funnel = get_income_funnel(ticker)
         return {
             "info": info,
@@ -105,7 +119,7 @@ def get_stock_research(ticker: str):
 class TransactionIn(BaseModel):
     ticker: str
     side: str
-    quantity: float
+    quantity: float = 0.0
     price_per_share: Optional[float] = None
     price_ccy: str = "THB"
     broker: str = "Other"
@@ -142,10 +156,12 @@ def post_transaction(tx: TransactionIn):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/ocr/parse")
-async def ocr_parse(file: UploadFile = File(...)):
+async def ocr_parse(request: Request, file: UploadFile = File(...)):
     try:
         from core.ocr_parser import parse_dime_image
         image_bytes = await file.read()
+        if await request.is_disconnected():
+            return {"transactions": []}
         parsed = parse_dime_image(image_bytes)
         return {"transactions": parsed}
     except Exception as e:
@@ -182,6 +198,29 @@ def ocr_import(body: BulkTransactionIn):
         return {"status": "ok", "imported": count}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+class TxCheckItem(BaseModel):
+    ticker: str
+    side: str
+    trade_date: str
+
+@app.post("/api/transactions/exists")
+def transactions_exist(items: List[TxCheckItem]):
+    from core.db import get_connection
+    conn = get_connection()
+    cur = conn.cursor()
+    existing = []
+    for item in items:
+        cur.execute(
+            """SELECT 1 FROM transactions t
+               JOIN assets a ON a.id = t.asset_id
+               WHERE a.ticker = ? AND t.side = ? AND t.trade_date = ? LIMIT 1""",
+            (item.ticker.strip().upper(), item.side.strip().lower(), item.trade_date)
+        )
+        if cur.fetchone():
+            existing.append(f"{item.ticker.upper()}|{item.side.lower()}|{item.trade_date}")
+    conn.close()
+    return {"existing": existing}
 
 @app.get("/api/assets")
 def get_assets():
