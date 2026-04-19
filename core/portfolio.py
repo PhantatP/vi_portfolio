@@ -85,11 +85,14 @@ def get_holdings_df():
         a.country,
         a.currency AS asset_currency,
         a.type,
+        a.sector,
+        a.industry,
         a.tags,
         h.broker,
         h.quantity,
         h.avg_price,
-        h.currency AS holding_currency
+        h.currency AS holding_currency,
+        a.target_weight
     FROM holdings h
     JOIN assets a ON a.id = h.asset_id
     ORDER BY a.ticker, h.broker;

@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS assets (
     type TEXT,           -- stock, etf, fund, crypto
     sector TEXT,
     industry TEXT,
-    tags TEXT            -- comma-separated: growth,dividend,core
+    tags TEXT,           -- comma-separated: growth,dividend,core
+    target_weight REAL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS holdings (

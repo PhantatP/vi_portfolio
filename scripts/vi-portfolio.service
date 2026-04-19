@@ -1,0 +1,14 @@
+[Unit]
+Description=VI Portfolio Streamlit App
+After=network.target
+
+[Service]
+# Replace 'username' with your actual username (e.g. 'ubuntu' or 'jetson')
+User=jetson
+WorkingDirectory=/home/jetson/vi_portfolio
+ExecStart=/home/jetson/vi_portfolio/.venv/bin/streamlit run app/web_app.py --server.address=0.0.0.0
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
