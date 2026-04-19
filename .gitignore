@@ -16,3 +16,4 @@ __pycache__
 .env.prod.example
 .env.test.example
 .env.dev.example
+node_modules/
