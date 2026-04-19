@@ -1,259 +1,197 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  LayoutDashboard,
-  Briefcase,
-  PieChart,
-  Search,
-  Settings,
-  TrendingUp,
-  ArrowUpRight,
-  ArrowDownRight,
-  Menu,
-  X
-} from 'lucide-react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Cell
-} from 'recharts';
+import { LayoutDashboard, Briefcase, PieChart, Search, Settings, ArrowUpRight, Menu, RefreshCw, ChevronRight, Plus, X } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api from './api';
 
-// Internal Components (I will split these later if needed)
-const Dashboard = () => {
+const fmt = (n, dec = 0) => (n ?? 0).toLocaleString('en-US', { maximumFractionDigits: dec });
+const fmtPct = (n) => `${n >= 0 ? '+' : ''}${(n ?? 0).toFixed(1)}%`;
+
+const Tag = ({ children, color = 'default' }) => {
+  const styles = {
+    default: { background: 'rgba(255,255,255,0.06)', color: '#888890' },
+    green:   { background: 'rgba(74,222,128,0.1)',   color: '#4ade80' },
+    red:     { background: 'rgba(248,113,113,0.1)',  color: '#f87171' },
+    lime:    { background: 'rgba(212,255,0,0.1)',    color: '#d4ff00' },
+  };
+  return (
+    <span style={{ ...styles[color], padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em', display: 'inline-flex', alignItems: 'center' }}>
+      {children}
+    </span>
+  );
+};
+
+const fade = { initial: { opacity: 0, y: 6 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0 }, transition: { duration: 0.2 } };
+
+const CardHeader = ({ title, sub }) => (
+  <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+    <p style={{ fontSize: 14, fontWeight: 600, color: '#e8e8ea' }}>{title}</p>
+    {sub && <p style={{ fontSize: 12, color: '#888890', marginTop: 3 }}>{sub}</p>}
+  </div>
+);
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
+const Dashboard = ({ refreshKey }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchDashboard = async () => {
-      try {
-        const res = await api.get('/dashboard');
-        setData(res.data);
-      } catch (err) {
-        console.error("Dashboard fetch error:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchDashboard();
-  }, []);
+    setLoading(true);
+    api.get('/dashboard').then(r => setData(r.data)).catch(console.error).finally(() => setLoading(false));
+  }, [refreshKey]);
 
   if (loading) return (
-    <div className="flex flex-col gap-6">
-      <div className="h-8 w-48 bg-white/5 rounded-lg animate-pulse" />
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {[1, 2, 3].map(i => <div key={i} className="h-32 glass rounded-2xl animate-pulse" />)}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 20 }}>
+        {[1,2,3].map(i => <div key={i} className="card rounded-xl animate-pulse" style={{ height: 130 }} />)}
       </div>
+      <div className="card rounded-xl animate-pulse" style={{ height: 280 }} />
     </div>
   );
 
-  if (!data) return <div className="text-red-400 p-8 glass rounded-2xl">Error loading financial data. Please check backend.</div>;
+  if (!data) return <div className="card rounded-lg" style={{ padding: 20, color: '#f87171', fontSize: 14 }}>Backend unreachable.</div>;
 
-  const topAsset = data.top_gainer ? data.top_gainer.ticker : 'N/A';
-  const chartData = data.allocation
-    ? Object.entries(data.allocation).map(([name, value]) => ({ name, value }))
-    : [];
+  const profit = data.total_profit ?? 0;
+  const profitPct = data.profit_pct ?? 0;
+  const topAsset = data.top_gainer?.ticker ?? '—';
+  const chartData = data.allocation ? Object.entries(data.allocation).map(([name, value]) => ({ name, value })) : [];
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="space-y-16 pb-20"
-    >
-      <div className="flex flex-col gap-4 mb-4">
-        <h2 className="text-4xl font-extrabold tracking-tight">Executive Summary</h2>
-        <p className="text-gray-400 font-medium">Real-time performance analytics for your portfolio.</p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
-        {/* Net Worth */}
-        <motion.div whileHover={{ y: -5 }} className="glass p-12 rounded-[2.5rem] relative group border-white/5 neo-shadow min-h-[200px] flex flex-col justify-between transition-all">
-          <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
-            <TrendingUp size={110} className="text-primary" />
-          </div>
-          <div className="relative z-10">
-            <p className="text-gray-500 text-xs font-black uppercase tracking-[0.2em] mb-5">Net Worth</p>
-            <p className="text-6xl font-black text-white tracking-tighter leading-none mb-6">
-              ฿ {data.total_val.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-            </p>
-          </div>
-          <div className="relative z-10 flex items-center gap-3 text-[10px] text-gray-500 font-black tracking-widest bg-white/5 w-fit px-5 py-2 rounded-full mt-auto">
-            <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
-            LIVE ANALYTICS
-          </div>
-        </motion.div>
-
-        {/* Unrealized Profit */}
-        <motion.div whileHover={{ y: -5 }} className="glass p-12 rounded-[2.5rem] relative group border-white/5 min-h-[200px] flex flex-col justify-between transition-all">
-          <div className="relative z-10">
-            <p className="text-gray-500 text-xs font-black uppercase tracking-[0.2em] mb-5">Unrealized P/L</p>
-            <p className={`text-6xl font-black tracking-tighter leading-none mb-6 ${data.total_profit >= 0 ? 'text-primary' : 'text-red-400'}`}>
-              ฿ {data.total_profit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-            </p>
-          </div>
-          <div className="relative z-10 flex items-center gap-4 mt-auto">
-            <span className={`text-sm font-black px-6 py-2.5 rounded-full uppercase tracking-[0.1em] ${data.profit_pct >= 0 ? 'bg-primary/20 text-primary border border-primary/20' : 'bg-red-400/20 text-red-400 border border-red-400/20'}`}>
-              {data.profit_pct >= 0 ? '+' : ''}{data.profit_pct.toFixed(1)}% Yield
+    <motion.div {...fade} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Stat row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 20 }}>
+        <div className="card rounded-xl" style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#555558' }}>Net Worth</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#555558' }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80', display: 'inline-block', animation: 'pulse 2s infinite' }} />
+              Live
             </span>
           </div>
-        </motion.div>
+          <p style={{ fontSize: 32, fontWeight: 600, letterSpacing: '-0.02em', color: '#fff', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+            ฿{fmt(data.total_val)}
+          </p>
+          <p style={{ fontSize: 12, color: '#555558', marginTop: 'auto' }}>Cost basis ฿{fmt(data.total_cost)}</p>
+        </div>
 
-        {/* Top Asset */}
-        <motion.div whileHover={{ y: -5 }} className="glass p-12 rounded-[2.5rem] relative group border-white/5 min-h-[200px] flex flex-col justify-between transition-all">
-          <div className="relative z-10">
-            <p className="text-gray-500 text-xs font-black uppercase tracking-[0.2em] mb-5">Principal asset</p>
-            <p className="text-6xl font-black text-white uppercase tracking-tighter leading-none mb-6">{topAsset}</p>
+        <div className="card rounded-xl" style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#555558' }}>Unrealized P/L</span>
+            <Tag color={profitPct >= 0 ? 'green' : 'red'}>{fmtPct(profitPct)}</Tag>
           </div>
-          <div className="relative z-10 text-[11px] text-gray-500 font-black uppercase tracking-widest flex items-center gap-3 mt-auto">
-            <ArrowUpRight size={20} className="text-primary" />
-            Portfolio Core
+          <p style={{ fontSize: 32, fontWeight: 600, letterSpacing: '-0.02em', color: profit >= 0 ? '#4ade80' : '#f87171', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+            {profit >= 0 ? '+' : ''}฿{fmt(Math.abs(profit))}
+          </p>
+          <p style={{ fontSize: 12, color: '#555558', marginTop: 'auto' }}>Total return on capital</p>
+        </div>
+
+        <div className="card rounded-xl" style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#555558' }}>Top Gainer</span>
+            <ArrowUpRight size={14} color="#d4ff00" />
           </div>
-        </motion.div>
+          <p style={{ fontSize: 32, fontWeight: 600, letterSpacing: '-0.02em', color: '#fff', lineHeight: 1 }}>{topAsset}</p>
+          <p style={{ fontSize: 12, color: '#555558', marginTop: 'auto' }}>
+            {data.top_gainer ? `+฿${fmt(data.top_gainer.unrealized_pl_thb ?? 0)} gain` : 'No positions yet'}
+          </p>
+        </div>
       </div>
 
-      <div className="glass p-14 rounded-[3rem] border-white/5 min-h-[500px]">
-        <div className="flex justify-between items-center mb-12">
-          <h3 className="text-xl font-bold text-gray-200">Asset Distribution</h3>
-          <div className="flex gap-2">
-            <div className="bg-primary/10 border border-primary/20 px-4 py-2 rounded-xl text-primary text-xs font-bold uppercase tracking-widest">
-              Value Breakdown
-            </div>
+      {/* Chart */}
+      <div className="card rounded-xl" style={{ padding: '24px 28px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <div>
+            <p style={{ fontSize: 14, fontWeight: 600, color: '#e8e8ea' }}>Asset Distribution</p>
+            <p style={{ fontSize: 12, color: '#888890', marginTop: 3 }}>Portfolio value by position</p>
           </div>
+          <Tag>THB</Tag>
         </div>
-        <div className="h-[450px] w-full mt-12 min-w-0">
-          <ResponsiveContainer width="100%" height="100%" debounce={50}>
-            <BarChart
-              data={chartData}
-              margin={{ top: 40, right: 30, left: 0, bottom: 40 }}
-              barSize={40}
-            >
-              <defs>
-                <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#d4ff00" stopOpacity={1} />
-                  <stop offset="100%" stopColor="#d4ff00" stopOpacity={0.4} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-              <XAxis
-                dataKey="name"
-                stroke="#555"
-                fontSize={14}
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: '#888', fontWeight: 800 }}
-              />
-              <YAxis
-                stroke="#555"
-                fontSize={14}
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: '#888', fontWeight: 800 }}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: 'rgba(10, 10, 11, 0.95)',
-                  border: '1px solid rgba(255,255,255,0.15)',
-                  borderRadius: '32px',
-                  backdropFilter: 'blur(30px)',
-                  padding: '24px'
-                }}
-                itemStyle={{ color: '#d4ff00', fontWeight: 'bold' }}
-                cursor={{ fill: 'rgba(255,255,255,0.03)' }}
-              />
-              <Bar
-                dataKey="value"
-                fill="url(#barGradient)"
-                radius={[12, 12, 0, 0]}
-                barSize={40}
-                animationDuration={1500}
-                animationEasing="ease-out"
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        {chartData.length === 0 ? (
+          <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555558', fontSize: 13 }}>
+            No allocation data yet
+          </div>
+        ) : (
+          <div style={{ height: 220 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 16 }} barSize={24}>
+                <defs>
+                  <linearGradient id="barG" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#d4ff00" stopOpacity={0.9} />
+                    <stop offset="100%" stopColor="#d4ff00" stopOpacity={0.2} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="2 4" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#555558', fontSize: 11, fontWeight: 600 }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#555558', fontSize: 11 }} />
+                <Tooltip contentStyle={{ background: '#1c1c20', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12, padding: '8px 12px' }} itemStyle={{ color: '#d4ff00', fontWeight: 600 }} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                <Bar dataKey="value" fill="url(#barG)" radius={[4,4,0,0]} animationDuration={900} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </div>
     </motion.div>
   );
 };
 
-const Holdings = ({ holdingsData }) => {
+// ─── Holdings ─────────────────────────────────────────────────────────────────
+const Holdings = ({ refreshKey }) => {
   const [holdings, setHoldings] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchHoldings = async () => {
-      try {
-        const res = await api.get('/holdings');
-        setHoldings(res.data);
-      } catch (err) {
-        console.error("Holdings fetch error:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchHoldings();
-  }, []);
+    setLoading(true);
+    api.get('/holdings').then(r => setHoldings(r.data)).catch(console.error).finally(() => setLoading(false));
+  }, [refreshKey]);
 
-  if (loading) return (
-    <div className="space-y-6">
-      <div className="h-8 w-48 bg-white/5 rounded-lg animate-pulse" />
-      <div className="h-[400px] glass rounded-3xl animate-pulse" />
-    </div>
-  );
+  if (loading) return <div className="card rounded-lg animate-pulse" style={{ height: 240 }} />;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="space-y-16 pb-20"
-    >
-      <div className="flex flex-col gap-4">
-        <h2 className="text-4xl font-extrabold tracking-tight">Active Holdings</h2>
-        <p className="text-gray-400 font-medium">Manage your currently deployed assets across all sectors.</p>
-      </div>
-
-      <div className="glass rounded-[3rem] border-white/5 p-4 transition-all">
-        <table className="w-full border-collapse">
+    <motion.div {...fade}>
+      <div className="card rounded-xl" style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14, minWidth: 580 }}>
           <thead>
-            <tr className="bg-white/5 text-gray-500 text-[10px] font-black uppercase tracking-[0.2em]">
-              <th className="px-8 py-6">Asset Ticker</th>
-              <th className="px-8 py-6">Quantity</th>
-              <th className="px-8 py-6">Entry Price</th>
-              <th className="px-8 py-6">Market Value</th>
-              <th className="px-8 py-6">Performance</th>
+            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              {['Ticker','Qty','Avg Cost','Market Value','P/L'].map((h, i) => (
+                <th key={h} style={{ padding: '14px 20px', textAlign: i === 0 ? 'left' : 'right', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#555558', whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/5">
-            {holdings.map((h) => (
-              <tr key={h.ticker} className="hover:bg-white/5 transition-colors group">
-                <td className="px-8 py-8">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary font-bold text-sm">
-                      {h.ticker[0]}
-                    </div>
-                    <span className="font-black text-xl text-white group-hover:text-primary transition-colors">{h.ticker}</span>
-                  </div>
-                </td>
-                <td className="px-8 py-8 font-mono text-gray-300">{h.total_quantity?.toLocaleString()}</td>
-                <td className="px-8 py-8 font-medium text-gray-300">฿ {h.avg_price_thb?.toLocaleString()}</td>
-                <td className="px-8 py-8 font-black text-lg text-white">฿ {h.value_thb?.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
-                <td className="px-8 py-8">
-                  <div className="flex flex-col gap-1 items-start">
-                    <span className={`text-lg font-black ${h.unrealized_pl_thb >= 0 ? 'text-primary' : 'text-red-400'}`}>
-                      {h.unrealized_pl_thb >= 0 ? '+' : ''}฿ {Math.abs(h.unrealized_pl_thb)?.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                    </span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${h.unrealized_pl_pct >= 0 ? 'bg-primary/20 text-primary' : 'bg-red-400/20 text-red-400'}`}>
-                      {(h.unrealized_pl_pct * 100).toFixed(1)}% Return
-                    </span>
-                  </div>
+          <tbody>
+            {holdings.length === 0 && (
+              <tr>
+                <td colSpan={5} style={{ padding: '48px 20px', textAlign: 'center', fontSize: 13, color: '#555558' }}>
+                  No holdings yet. Add your first position to get started.
                 </td>
               </tr>
-            ))}
+            )}
+            {holdings.map(h => {
+              const pl = h.unrealized_pl_thb ?? 0;
+              const plPct = (h.unrealized_pl_pct ?? 0) * 100;
+              return (
+                <tr key={h.ticker} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }} className="hover:bg-white/[0.02] transition-colors">
+                  <td style={{ padding: '14px 20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ width: 30, height: 30, borderRadius: 8, background: 'rgba(212,255,0,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#d4ff00', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
+                        {h.ticker?.[0]}
+                      </div>
+                      <span style={{ fontWeight: 600, color: '#e8e8ea' }}>{h.ticker}</span>
+                    </div>
+                  </td>
+                  <td style={{ padding: '14px 20px', textAlign: 'right', color: '#888890', fontVariantNumeric: 'tabular-nums' }}>{h.total_quantity?.toLocaleString()}</td>
+                  <td style={{ padding: '14px 20px', textAlign: 'right', color: '#888890' }}>฿{h.avg_price_thb?.toLocaleString()}</td>
+                  <td style={{ padding: '14px 20px', textAlign: 'right', fontWeight: 600, color: '#e8e8ea' }}>฿{fmt(h.value_thb)}</td>
+                  <td style={{ padding: '14px 20px', textAlign: 'right' }}>
+                    <div style={{ fontWeight: 600, color: pl >= 0 ? '#4ade80' : '#f87171', fontVariantNumeric: 'tabular-nums' }}>
+                      {pl >= 0 ? '+' : ''}฿{fmt(Math.abs(pl))}
+                    </div>
+                    <div style={{ fontSize: 11, marginTop: 2, color: plPct >= 0 ? 'rgba(74,222,128,0.6)' : 'rgba(248,113,113,0.6)' }}>
+                      {fmtPct(plPct)}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -261,110 +199,81 @@ const Holdings = ({ holdingsData }) => {
   );
 };
 
+// ─── Analysis ─────────────────────────────────────────────────────────────────
 const Analysis = () => {
   const [dist, setDist] = useState([]);
   const [rebal, setRebal] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [dRes, rRes] = await Promise.all([
-          api.get('/analysis/distribution'),
-          api.get('/analysis/rebalance')
-        ]);
-        setDist(dRes.data);
-        setRebal(rRes.data);
-      } catch (err) {
-        console.error("Analysis fetch error:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
+    Promise.all([api.get('/analysis/distribution'), api.get('/analysis/rebalance')])
+      .then(([d, r]) => { setDist(d.data); setRebal(r.data); })
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }, []);
 
   if (loading) return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      <div className="h-96 glass rounded-3xl animate-pulse" />
-      <div className="h-96 glass rounded-3xl animate-pulse" />
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+      <div className="card rounded-xl animate-pulse" style={{ height: 280 }} />
+      <div className="card rounded-xl animate-pulse" style={{ height: 280 }} />
     </div>
   );
 
+  const total = dist.reduce((a, c) => a + c.value_thb, 0);
+  const sectors = Array.from(new Set(dist.map(d => d.sector)))
+    .map(s => ({ sector: s, pct: total > 0 ? dist.filter(d => d.sector === s).reduce((a,c) => a + c.value_thb, 0) / total * 100 : 0 }))
+    .sort((a, b) => b.pct - a.pct);
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="space-y-16 pb-20"
-    >
-      <div className="flex flex-col gap-4">
-        <h2 className="text-4xl font-extrabold tracking-tight">Portfolio Optimization</h2>
-        <p className="text-gray-400 font-medium">Algorithmic rebalancing and sector distribution matrix.</p>
+    <motion.div {...fade} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+      {/* Rebalance */}
+      <div className="card rounded-xl" style={{ overflow: 'hidden' }}>
+        <CardHeader title="Rebalancing" sub="Actions to reach target weights" />
+        <div>
+          {rebal.length === 0 && <p style={{ padding: '24px 20px', fontSize: 13, color: '#555558' }}>No rebalancing needed</p>}
+          {rebal.map(r => {
+            const isBuy = r.difference_pct >= 0;
+            return (
+              <div key={r.ticker} style={{ padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.04)' }} className="hover:bg-white/[0.02] transition-colors">
+                <div>
+                  <p style={{ fontWeight: 600, color: '#e8e8ea', fontSize: 14 }}>{r.ticker}</p>
+                  <p style={{ fontSize: 12, color: '#555558', marginTop: 3 }}>{r.current_weight?.toFixed(1)}% → {r.target_weight?.toFixed(1)}%</p>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <Tag color={isBuy ? 'green' : 'red'}>{isBuy ? 'BUY' : 'SELL'}</Tag>
+                  <p style={{ fontWeight: 600, color: '#e8e8ea', fontSize: 14, marginTop: 4 }}>฿{fmt(Math.abs(r.diff_value_thb))}</p>
+                  <p style={{ fontSize: 11, color: '#555558', marginTop: 2 }}>{Math.abs(r.shares_to_buy).toFixed(2)} shares</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-14">
-        {/* Rebalance List */}
-        <div className="space-y-8">
-          <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.3em] ml-4">Optimization Strategy</h3>
-          <div className="space-y-6">
-            {rebal.map(r => {
-              const diff = r.difference_pct;
-              return (
-                <motion.div
-                  key={r.ticker}
-                  whileHover={{ x: 5 }}
-                  className="flex justify-between items-center p-5 rounded-3xl bg-white/5 border border-white/5 hover:border-primary/20 transition-all group"
-                >
-                  <div>
-                    <p className="text-xl font-black text-white group-hover:text-primary transition-colors uppercase tracking-tighter">{r.ticker}</p>
-                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">
-                      {r.current_weight?.toFixed(1)}% <span className="text-gray-700 mx-1">→</span> {r.target_weight?.toFixed(1)}%
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className={`text-lg font-black ${diff >= 0 ? 'text-primary' : 'text-red-400'}`}>
-                      {diff >= 0 ? 'BUY' : 'SELL'} ฿ {Math.abs(r.diff_value_thb).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                    </p>
-                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">{Math.abs(r.shares_to_buy).toFixed(2)} SHARES</p>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Distribution Summary */}
-        <div className="glass p-10 rounded-[2.5rem] border-white/5 flex flex-col min-h-[500px]">
-          <h3 className="text-xl font-bold mb-10">Sector Allocation</h3>
-          <div className="flex-1 w-full space-y-8">
-            {Array.from(new Set(dist.map(d => d.sector))).map(s => {
-              const val = dist.filter(d => d.sector === s).reduce((acc, curr) => acc + curr.value_thb, 0);
-              const total = dist.reduce((acc, curr) => acc + curr.value_thb, 0);
-              const pct = total > 0 ? (val / total * 100).toFixed(1) : 0;
-              return (
-                <div key={s} className="space-y-3">
-                  <div className="flex justify-between text-sm items-baseline">
-                    <span className="text-gray-300 font-bold uppercase tracking-widest text-xs">{s}</span>
-                    <span className="font-black text-xl text-primary tabular-nums">{pct}%</span>
-                  </div>
-                  <div className="h-3 bg-white/5 rounded-full overflow-hidden p-0.5 border border-white/5">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${pct}%` }}
-                      transition={{ duration: 1, ease: "circOut" }}
-                      className="h-full bg-gradient-to-r from-primary/40 to-primary rounded-full shadow-[0_0_15px_rgba(212,255,0,0.4)]"
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+      {/* Sector Allocation */}
+      <div className="card rounded-xl" style={{ overflow: 'hidden' }}>
+        <CardHeader title="Sector Allocation" sub="Distribution across sectors" />
+        <div style={{ padding: '20px' }}>
+          {sectors.length === 0 && <p style={{ fontSize: 13, color: '#555558', padding: '12px 0' }}>No sector data yet</p>}
+          {sectors.map(({ sector, pct: p }) => (
+            <div key={sector} style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+                <span style={{ color: '#888890', fontWeight: 500 }}>{sector}</span>
+                <span style={{ color: '#e8e8ea', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{p.toFixed(1)}%</span>
+              </div>
+              <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden' }}>
+                <motion.div initial={{ width: 0 }} animate={{ width: `${p}%` }} transition={{ duration: 0.7 }}
+                  style={{ height: '100%', background: '#d4ff00', borderRadius: 4 }} />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </motion.div>
   );
 };
 
+// ─── Discovery ────────────────────────────────────────────────────────────────
 const Discovery = () => {
   const [search, setSearch] = useState('');
   const [picks, setPicks] = useState([]);
@@ -373,340 +282,634 @@ const Discovery = () => {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const fetchMeta = async () => {
-      const [pRes, sRes] = await Promise.all([
-        api.get('/discovery/smart-picks'),
-        api.get('/discovery/sectors')
-      ]);
-      setPicks(pRes.data);
-      setSectors(sRes.data);
-    };
-    fetchMeta();
+    Promise.all([api.get('/discovery/smart-picks'), api.get('/discovery/sectors')])
+      .then(([p, s]) => { setPicks(p.data); setSectors(s.data); })
+      .catch(console.error);
   }, []);
 
-  const performSearch = async (ticker) => {
-    const t = ticker || search;
+  const doSearch = async (ticker) => {
+    const t = (ticker || search).trim().toUpperCase();
     if (!t) return;
-    setLoading(true);
     setSearch(t);
-    try {
-      const res = await api.get(`/research/stock/${t}`);
-      setResearch(res.data);
-    } catch (err) {
-      console.error("Research error:", err);
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true);
+    try { const res = await api.get(`/research/stock/${t}`); setResearch(res.data); }
+    catch (e) { console.error(e); }
+    finally { setLoading(false); }
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="space-y-16 pb-20"
-    >
-      <div className="flex flex-col gap-4">
-        <h2 className="text-4xl font-extrabold tracking-tight">Market Intelligence</h2>
-        <p className="text-gray-400 font-medium">Discover top-tier assets and analyze sector trends.</p>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-14">
-        {/* Search & Suggestions */}
-        <div className="lg:col-span-2 space-y-10">
-          <div className="glass p-12 rounded-[3.5rem] border-white/5 relative group transition-all">
-            <div className="absolute -right-20 -top-20 w-80 h-80 bg-primary/5 rounded-full blur-3xl group-hover:bg-primary/10 transition-colors" />
-            <h3 className="text-xs font-black text-gray-400 uppercase tracking-[0.3em] mb-10">Asset Discovery</h3>
-            <div className="flex flex-col sm:flex-row gap-6">
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.toUpperCase())}
-                placeholder="ENTER TICKER (E.G. NVDA)"
-                className="flex-1 bg-white/[0.03] border border-white/10 rounded-[2rem] px-10 py-6 outline-none focus:border-primary/50 focus:bg-white/10 transition-all font-black text-2xl tracking-tighter w-full"
-                onKeyDown={(e) => e.key === 'Enter' && performSearch()}
-              />
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => performSearch()}
-                className="bg-primary text-black px-14 py-6 rounded-[2rem] font-black text-base uppercase tracking-widest shadow-[0_20px_40px_rgba(212,255,0,0.3)] min-w-[200px]"
-              >
-                Analyze
-              </motion.button>
-            </div>
+    <motion.div {...fade} style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 20 }}>
+      {/* Left */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        {/* Search bar */}
+        <div className="card rounded-xl" style={{ padding: '20px 24px' }}>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <input
+              type="text" value={search}
+              onChange={e => setSearch(e.target.value.toUpperCase())}
+              onKeyDown={e => e.key === 'Enter' && doSearch()}
+              placeholder="Search ticker — e.g. AAPL, NVDA, TSLA"
+              style={{ flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '10px 16px', fontSize: 14, color: '#e8e8ea', outline: 'none' }}
+            />
+            <button onClick={() => doSearch()}
+              style={{ background: '#d4ff00', color: '#000', padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: 'none', flexShrink: 0 }}>
+              Analyze
+            </button>
           </div>
-
-          <div className="glass p-12 rounded-[3rem] border-white/5 transition-all">
-            <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.3em] mb-10">Smart Suggestions</h3>
-            <div className="flex flex-wrap gap-5">
+          {picks.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12, alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: '#555558', marginRight: 4 }}>Suggestions:</span>
               {picks.map(p => (
-                <button
-                  key={p}
-                  onClick={() => performSearch(p)}
-                  className="px-10 py-5 bg-white/[0.03] border border-white/10 rounded-[1.5rem] hover:border-primary/50 hover:bg-primary/5 transition-all font-black text-lg tracking-tighter uppercase"
-                >
+                <button key={p} onClick={() => doSearch(p)}
+                  style={{ fontSize: 12, padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, color: '#888890', cursor: 'pointer' }}>
                   {p}
                 </button>
               ))}
             </div>
-          </div>
+          )}
         </div>
 
-        {/* Sector Explorer */}
-        <div className="glass p-12 rounded-[3rem] border-white/5 overflow-y-auto max-h-[850px] shadow-inner transition-all">
-          <h3 className="text-xs font-black text-gray-500 uppercase tracking-[0.3em] mb-10">Intelligence Catalog</h3>
-          <div className="space-y-14 pr-4">
-            {Object.entries(sectors).map(([sector, symbols]) => (
-              <div key={sector} className="group">
-                <p className="text-[12px] text-primary/60 mb-6 font-black uppercase tracking-[0.3em] transition-colors">{sector}</p>
-                <div className="flex flex-wrap gap-4">
-                  {symbols.map(s => (
-                    <button
-                      key={s}
-                      onClick={() => performSearch(s)}
-                      className="text-[12px] px-5 py-3 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-primary/50 hover:text-primary transition-all font-black uppercase tracking-tight"
-                    >
-                      {s}
-                    </button>
-                  ))}
+        {loading && (
+          <div className="card rounded-xl" style={{ padding: '32px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, fontSize: 13, color: '#888890' }}>
+            <RefreshCw size={14} className="animate-spin" /> Fetching market data...
+          </div>
+        )}
+
+        {research && !loading && (
+          <motion.div {...fade} className="card rounded-xl" style={{ overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                  <Tag color="lime">{research.info.symbol}</Tag>
+                  {research.info.sector && <Tag>{research.info.sector}</Tag>}
                 </div>
+                <h3 style={{ fontSize: 18, fontWeight: 600, color: '#e8e8ea', lineHeight: 1.3 }}>{research.info.longName}</h3>
+                <p style={{ fontSize: 12, color: '#888890', marginTop: 4 }}>{research.info.industry}</p>
               </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {loading && (
-        <div className="flex flex-col items-center justify-center py-40 space-y-4">
-          <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
-          <p className="text-xs font-black text-gray-500 uppercase tracking-[0.3em]">Quantum Synthesis in Progress</p>
-        </div>
-      )}
-
-      {research && !loading && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.98 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="glass p-16 pb-32 rounded-[4rem] border-white/5 space-y-20 shadow-2xl relative"
-        >
-          <div className="absolute top-10 right-16 opacity-5 select-none text-right">
-            <div className="text-[12rem] font-black text-white leading-none">{research.info.symbol}</div>
-          </div>
-
-          <div className="flex justify-between items-start relative z-10 pt-4">
-            <div className="space-y-6">
-              <span className="text-[11px] font-black text-primary bg-primary/10 px-6 py-2 rounded-full tracking-[0.2em] uppercase border border-primary/20">
-                📊 Fundamental Analysis
-              </span>
-              <div className="space-y-1">
-                <h3 className="text-7xl font-black text-white tracking-tighter leading-tight drop-shadow-2xl">{research.info.longName}</h3>
-                <p className="text-xl text-gray-500 font-bold uppercase tracking-widest">{research.info.sector} <span className="text-gray-800 mx-3">•</span> {research.info.industry}</p>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <p style={{ fontSize: 22, fontWeight: 600, color: '#e8e8ea', fontVariantNumeric: 'tabular-nums' }}>฿{research.info.currentPrice?.toLocaleString()}</p>
+                <p style={{ fontSize: 11, color: '#888890', marginTop: 3 }}>Current Price</p>
               </div>
             </div>
-            <div className="text-right space-y-2 mt-4 pr-2">
-              <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Market Valuation</p>
-              <p className="text-7xl font-black tracking-tighter text-white">฿ {research.info.currentPrice?.toLocaleString()}</p>
+
+            {/* Metrics */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              {[
+                { label: 'P/E Forward', val: research.info.forwardPE?.toFixed(2) ?? '—' },
+                { label: 'Market Cap',  val: research.info.marketCap ? `$${(research.info.marketCap/1e9).toFixed(1)}B` : '—' },
+                { label: 'Dividend',    val: research.info.dividendYield ? `${(research.info.dividendYield*100).toFixed(2)}%` : '—' },
+                { label: 'Beta',        val: research.info.beta?.toFixed(2) ?? '—' },
+              ].map((m, i) => (
+                <div key={m.label} style={{ padding: '16px 20px', borderRight: i < 3 ? '1px solid rgba(255,255,255,0.06)' : 'none' }}>
+                  <p style={{ fontSize: 11, color: '#555558', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{m.label}</p>
+                  <p style={{ fontSize: 18, fontWeight: 600, color: '#e8e8ea', marginTop: 6 }}>{m.val}</p>
+                </div>
+              ))}
             </div>
-          </div>
 
-          {/* Metrics Grid */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-8 relative z-10">
-            {[
-              { label: 'Expectation (P/E)', val: research.info.forwardPE?.toFixed(2), icon: <LayoutDashboard size={18} /> },
-              { label: 'Market Capital', val: research.info.marketCap ? `${(research.info.marketCap / 1e9).toFixed(1)}B` : 'N/A', icon: <Briefcase size={18} /> },
-              { label: 'Dividend Potential', val: research.info.dividendYield ? `${(research.info.dividendYield * 100).toFixed(2)}%` : '0.00%', icon: <PieChart size={18} /> },
-              { label: 'Volatility (Beta)', val: research.info.beta?.toFixed(2), icon: <TrendingUp size={18} /> }
-            ].map(m => (
-              <div key={m.label} className="bg-white/[0.03] p-10 rounded-[2.5rem] border border-white/5 group hover:border-primary/30 transition-all shadow-lg">
-                <div className="text-gray-600 mb-6 group-hover:text-primary transition-colors">{m.icon}</div>
-                <p className="text-[10px] text-gray-500 font-black uppercase tracking-[0.2em] mb-2">{m.label}</p>
-                <p className="text-3xl font-black text-white tracking-tight">{m.val || 'N/A'}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Funnel */}
-          {research.funnel && research.funnel["Total Revenue"] && (
-            <div className="space-y-12 relative z-10 bg-white/[0.02] p-12 rounded-[3rem] border border-white/5">
-              <h4 className="text-2xl font-black text-white tracking-tight flex items-center gap-4">
-                <div className="w-8 h-1 bg-primary rounded-full" />
-                Efficiency Metrics <span className="text-gray-600 font-bold text-sm ml-2 tracking-widest">PROJECTION {research.funnel.Date}</span>
-              </h4>
-              <div className="space-y-10">
+            {/* Funnel */}
+            {research.funnel?.["Total Revenue"] && (
+              <div style={{ padding: '20px 24px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <p style={{ fontSize: 11, color: '#555558', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>Income Funnel</p>
                 {[
-                  { label: 'GROSS REVENUE', key: 'Total Revenue', color: 'bg-white/20' },
-                  { label: 'GROSS MARGIN', key: 'Gross Profit', color: 'bg-primary/40' },
-                  { label: 'OPERATING EDGE', key: 'Operating Income', color: 'bg-primary/70' },
-                  { label: 'NET CONVERSION', key: 'Net Income', color: 'bg-primary' }
-                ].map((step, idx) => {
+                  { label: 'Revenue',         key: 'Total Revenue' },
+                  { label: 'Gross Profit',     key: 'Gross Profit' },
+                  { label: 'Operating Income', key: 'Operating Income' },
+                  { label: 'Net Income',       key: 'Net Income' },
+                ].map((step, i) => {
                   const val = research.funnel[step.key];
                   const total = research.funnel["Total Revenue"];
-                  const pct = (val / total * 100).toFixed(1);
+                  const p = val ? (val / total * 100) : 0;
                   if (!val) return null;
                   return (
-                    <div key={step.key} className="space-y-4">
-                      <div className="flex justify-between items-end px-2">
-                        <span className="text-[11px] font-black uppercase tracking-[0.25em] text-gray-500">{step.label}</span>
-                        <span className="font-black text-lg text-white">฿ {(val / 1e9).toFixed(2)}B <span className="text-primary ml-2 opacity-80">({pct}%)</span></span>
+                    <div key={step.key} style={{ marginBottom: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 5 }}>
+                        <span style={{ color: '#888890' }}>{step.label}</span>
+                        <span style={{ color: '#e8e8ea', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
+                          ${(val/1e9).toFixed(2)}B <span style={{ color: '#555558', marginLeft: 8 }}>{p.toFixed(1)}%</span>
+                        </span>
                       </div>
-                      <div className="relative h-6 w-full bg-white/5 rounded-full overflow-hidden border border-white/5 shadow-inner">
-                        <motion.div
-                          initial={{ width: 0 }}
-                          animate={{ width: `${pct}%` }}
-                          transition={{ duration: 1.5, delay: idx * 0.1, ease: "circOut" }}
-                          className={`h-full ${step.color} rounded-full shadow-[0_0_20px_rgba(212,255,0,0.2)]`}
-                        />
+                      <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden' }}>
+                        <motion.div initial={{ width: 0 }} animate={{ width: `${p}%` }} transition={{ duration: 0.8, delay: i * 0.08 }}
+                          style={{ height: '100%', background: '#d4ff00', borderRadius: 4 }} />
                       </div>
                     </div>
                   );
                 })}
               </div>
-            </div>
-          )}
+            )}
 
-          <div className="space-y-8 relative z-10 px-4">
-            <h4 className="text-2xl font-black text-white tracking-tight flex items-center gap-4">
-              <div className="w-8 h-1 bg-primary rounded-full" />
-              Business Intelligence
-            </h4>
-            <p className="text-gray-400 leading-relaxed text-lg font-medium max-w-5xl">{research.info.summary}</p>
-          </div>
-        </motion.div>
-      )}
+            {research.info.summary && (
+              <div style={{ padding: '20px 24px' }}>
+                <p style={{ fontSize: 11, color: '#555558', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>About</p>
+                <p style={{ fontSize: 13, color: '#888890', lineHeight: 1.65, display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{research.info.summary}</p>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </div>
+
+      {/* Right: Sector Catalog */}
+      <div className="card rounded-xl" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', flexShrink: 0 }}>
+          <p style={{ fontSize: 14, fontWeight: 600, color: '#e8e8ea' }}>Sector Catalog</p>
+        </div>
+        <div style={{ overflowY: 'auto', flex: 1, padding: 16 }}>
+          {Object.entries(sectors).map(([sector, symbols]) => (
+            <div key={sector} style={{ marginBottom: 20 }}>
+              <p style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#555558', marginBottom: 8 }}>{sector}</p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                {symbols.map(s => (
+                  <button key={s} onClick={() => doSearch(s)}
+                    style={{ fontSize: 11, padding: '4px 8px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 5, color: '#888890', cursor: 'pointer' }}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </motion.div>
   );
 };
 
-const App = () => {
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [isSidebarOpen, setSidebarOpen] = useState(true);
+// ─── Add Transaction Modal ────────────────────────────────────────────────────
+const BROKERS = ['SCB', 'Dime', 'IBKR', 'Bitkub', 'Binance', 'Other'];
 
-  const tabs = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'holdings', label: 'Holdings', icon: Briefcase },
-    { id: 'analysis', label: 'Analysis', icon: PieChart },
-    { id: 'discovery', label: 'Discovery', icon: Search },
-    { id: 'more', label: 'Settings', icon: Settings },
-  ];
+const inputStyle = {
+  width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+  borderRadius: 8, padding: '9px 14px', fontSize: 14, color: '#e8e8ea', outline: 'none',
+};
+const labelStyle = {
+  fontSize: 11, fontWeight: 700, color: '#555558', textTransform: 'uppercase',
+  letterSpacing: '0.08em', marginBottom: 6, display: 'block',
+};
+
+// ── Manual entry form ──
+const ManualForm = ({ onClose, onSuccess }) => {
+  const today = new Date().toISOString().split('T')[0];
+  const [form, setForm] = useState({
+    ticker: '', side: 'buy', quantity: '', price_per_share: '',
+    price_ccy: 'THB', broker: 'Other', trade_date: today,
+    fee: '', thb_amount: '', fx_thb_per_usd: '',
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSubmit = async () => {
+    if (!form.ticker.trim()) { setError('Ticker is required'); return; }
+    if (!form.quantity || Number(form.quantity) <= 0) { setError('Quantity must be > 0'); return; }
+    setError(''); setSubmitting(true);
+    try {
+      await api.post('/transactions', {
+        ticker: form.ticker.trim().toUpperCase(), side: form.side,
+        quantity: Number(form.quantity),
+        price_per_share: form.price_per_share ? Number(form.price_per_share) : null,
+        price_ccy: form.price_ccy, broker: form.broker,
+        trade_date: form.trade_date || today, fee: Number(form.fee) || 0,
+        thb_amount: form.thb_amount ? Number(form.thb_amount) : null,
+        fx_thb_per_usd: form.fx_thb_per_usd ? Number(form.fx_thb_per_usd) : null,
+      });
+      onSuccess(); onClose();
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Failed to add transaction');
+    } finally { setSubmitting(false); }
+  };
 
   return (
-    <div className="min-h-screen flex bg-background text-white selection:bg-primary/30 font-sans">
-      {/* Sidebar */}
-      <aside className={`w-72 glass-nav p-8 flex flex-col gap-12 transition-all duration-500 ease-in-out z-50 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full absolute md:relative'}`}>
-        <div className="flex items-center gap-4 px-2">
-          <div className="w-14 h-14 bg-primary rounded-3xl flex items-center justify-center text-black font-black text-2xl shadow-[0_0_30px_rgba(212,255,0,0.4)]">
-            VI
-          </div>
-          <div className="flex flex-col">
-            <span className="text-2xl font-black leading-none tracking-tighter">VI SYSTEM</span>
-            <span className="text-[10px] text-primary font-black tracking-[0.3em] mt-1.5 ml-0.5 uppercase">Intelligence</span>
+    <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {/* Ticker + Side */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 14 }}>
+        <div>
+          <label style={labelStyle}>Ticker</label>
+          <input style={inputStyle} placeholder="e.g. CPALL.BK, AAPL" value={form.ticker}
+            onChange={e => set('ticker', e.target.value.toUpperCase())} />
+        </div>
+        <div>
+          <label style={labelStyle}>Side</label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {['buy', 'sell'].map(s => (
+              <button key={s} onClick={() => set('side', s)}
+                style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid', fontSize: 13, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s',
+                  ...(form.side === s
+                    ? s === 'buy' ? { background: 'rgba(74,222,128,0.15)', borderColor: 'rgba(74,222,128,0.4)', color: '#4ade80' }
+                                  : { background: 'rgba(248,113,113,0.15)', borderColor: 'rgba(248,113,113,0.4)', color: '#f87171' }
+                    : { background: 'transparent', borderColor: 'rgba(255,255,255,0.08)', color: '#555558' })
+                }}>{s.charAt(0).toUpperCase() + s.slice(1)}</button>
+            ))}
           </div>
         </div>
+      </div>
 
-        <nav className="flex-1 space-y-3">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
+      {/* Date + Broker */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <label style={labelStyle}>Date</label>
+          <input type="date" style={inputStyle} value={form.trade_date} onChange={e => set('trade_date', e.target.value)} />
+        </div>
+        <div>
+          <label style={labelStyle}>Broker</label>
+          <select style={{ ...inputStyle, cursor: 'pointer' }} value={form.broker} onChange={e => set('broker', e.target.value)}>
+            {BROKERS.map(b => <option key={b} value={b} style={{ background: '#18181c' }}>{b}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* Qty + Price + Currency */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 14 }}>
+        <div>
+          <label style={labelStyle}>Quantity</label>
+          <input type="number" min="0" step="any" style={inputStyle} placeholder="0" value={form.quantity} onChange={e => set('quantity', e.target.value)} />
+        </div>
+        <div>
+          <label style={labelStyle}>Price / Share</label>
+          <input type="number" min="0" step="any" style={inputStyle} placeholder="0.00" value={form.price_per_share} onChange={e => set('price_per_share', e.target.value)} />
+        </div>
+        <div>
+          <label style={labelStyle}>Ccy</label>
+          <select style={{ ...inputStyle, width: 80, cursor: 'pointer' }} value={form.price_ccy} onChange={e => set('price_ccy', e.target.value)}>
+            {['THB', 'USD'].map(c => <option key={c} value={c} style={{ background: '#18181c' }}>{c}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* THB Total + FX + Fee */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <label style={labelStyle}>THB Total (optional)</label>
+          <input type="number" min="0" step="any" style={inputStyle} placeholder="Overrides price×qty" value={form.thb_amount} onChange={e => set('thb_amount', e.target.value)} />
+        </div>
+        {form.price_ccy === 'USD' ? (
+          <div>
+            <label style={labelStyle}>FX Rate (THB/USD)</label>
+            <input type="number" min="0" step="any" style={inputStyle} placeholder="e.g. 33.5" value={form.fx_thb_per_usd} onChange={e => set('fx_thb_per_usd', e.target.value)} />
+          </div>
+        ) : (
+          <div>
+            <label style={labelStyle}>Fee</label>
+            <input type="number" min="0" step="any" style={inputStyle} placeholder="0.00" value={form.fee} onChange={e => set('fee', e.target.value)} />
+          </div>
+        )}
+      </div>
+      {form.price_ccy === 'USD' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div>
+            <label style={labelStyle}>Fee</label>
+            <input type="number" min="0" step="any" style={inputStyle} placeholder="0.00" value={form.fee} onChange={e => set('fee', e.target.value)} />
+          </div>
+        </div>
+      )}
+
+      {error && <p style={{ fontSize: 13, color: '#f87171', padding: '10px 14px', background: 'rgba(248,113,113,0.08)', borderRadius: 8, border: '1px solid rgba(248,113,113,0.15)' }}>{error}</p>}
+
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
+        <button onClick={onClose} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)', background: 'transparent', color: '#888890', fontSize: 13, cursor: 'pointer' }}
+          className="hover:text-white hover:border-white/20 transition-colors">Cancel</button>
+        <button onClick={handleSubmit} disabled={submitting}
+          style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: submitting ? 'rgba(212,255,0,0.5)' : '#d4ff00', color: '#000', fontSize: 13, fontWeight: 700, cursor: submitting ? 'not-allowed' : 'pointer' }}>
+          {submitting ? 'Saving…' : `Confirm ${form.side === 'buy' ? 'Buy' : 'Sell'}`}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ── OCR / Photo scan form ──
+const ScanPhotoForm = ({ onClose, onSuccess }) => {
+  const [rows, setRows] = useState(null);
+  const [scanning, setScanning] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [error, setError] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+  const [imageUrl, setImageUrl] = useState(null);
+
+  useEffect(() => {
+    return () => { if (imageUrl) URL.revokeObjectURL(imageUrl); };
+  }, [imageUrl]);
+
+  const processFile = async (file) => {
+    if (!file) return;
+    // Create preview URL before async OCR
+    const url = URL.createObjectURL(file);
+    if (imageUrl) URL.revokeObjectURL(imageUrl);
+    setImageUrl(url);
+    setError(''); setScanning(true); setRows(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await api.post('/ocr/parse', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const parsed = (res.data.transactions || []).filter(t => t.side === 'buy' || t.side === 'sell');
+      if (parsed.length === 0) { setError('No buy/sell transactions found in image.'); }
+      else { setRows(parsed.map(t => ({ ...t, broker: 'Dime', fee: 0, selected: true }))); }
+    } catch (e) {
+      setError(e.response?.data?.detail || 'OCR failed. Try a clearer screenshot.');
+    } finally { setScanning(false); }
+  };
+
+  const resetScan = () => {
+    setRows(null); setError('');
+    if (imageUrl) { URL.revokeObjectURL(imageUrl); setImageUrl(null); }
+  };
+
+  const handleDrop = (e) => { e.preventDefault(); setDragOver(false); processFile(e.dataTransfer.files[0]); };
+  const handleFileInput = (e) => processFile(e.target.files[0]);
+  const setRowField = (i, k, v) => setRows(prev => prev.map((r, idx) => idx === i ? { ...r, [k]: v } : r));
+
+  const handleImport = async () => {
+    const selected = rows.filter(r => r.selected);
+    if (selected.length === 0) { setError('Select at least one transaction.'); return; }
+    setError(''); setImporting(true);
+    try {
+      await api.post('/ocr/import', {
+        transactions: selected.map(r => ({
+          ticker: r.ticker, side: r.side, quantity: Number(r.quantity),
+          price_per_share: r.price ? Number(r.price) : null,
+          price_ccy: r.price_currency || 'USD', broker: r.broker || 'Dime',
+          trade_date: r.trade_date, fee: Number(r.fee) || 0,
+          thb_amount: r.total_amount ? Number(r.total_amount) : null,
+        })),
+      });
+      onSuccess(); onClose();
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Import failed');
+    } finally { setImporting(false); }
+  };
+
+  const cellInput = { background: 'transparent', border: 'none', outline: 'none', color: '#e8e8ea', fontSize: 13, width: '100%', fontFamily: 'inherit' };
+
+  // Side-by-side layout when image + results are ready
+  const showSplit = imageUrl && (rows || scanning);
+
+  return (
+    <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+      {/* Drop zone — only shown when no image yet */}
+      {!imageUrl && (
+        <div
+          onDrop={handleDrop} onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}
+          onClick={() => document.getElementById('ocr-file-input').click()}
+          style={{ border: `2px dashed ${dragOver ? '#d4ff00' : 'rgba(255,255,255,0.12)'}`, borderRadius: 12, padding: '40px 24px', textAlign: 'center', cursor: 'pointer', transition: 'border-color 0.15s', background: dragOver ? 'rgba(212,255,0,0.03)' : 'transparent' }}>
+          <input id="ocr-file-input" type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} onChange={handleFileInput} />
+          <div style={{ fontSize: 28, marginBottom: 10 }}>📸</div>
+          <p style={{ fontSize: 14, fontWeight: 600, color: '#e8e8ea', marginBottom: 4 }}>Drop a Dime screenshot here</p>
+          <p style={{ fontSize: 12, color: '#555558' }}>PNG or JPG — or click to browse</p>
+        </div>
+      )}
+
+      {/* Split view: image preview + results */}
+      {showSplit && (
+        <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 16, alignItems: 'start' }}>
+          {/* Photo panel */}
+          <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
+            <div style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#555558' }}>Source</span>
+              <button onClick={resetScan} style={{ fontSize: 11, color: '#555558', background: 'transparent', border: 'none', cursor: 'pointer' }}
+                className="hover:text-white transition-colors">Rescan</button>
+            </div>
+            <img src={imageUrl} alt="Uploaded screenshot"
+              style={{ width: '100%', display: 'block', maxHeight: 480, objectFit: 'contain', background: '#0c0c0e' }} />
+          </div>
+
+          {/* Results panel */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+            {scanning ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '48px 0' }}>
+                <RefreshCw size={20} color="#d4ff00" className="animate-spin" />
+                <p style={{ fontSize: 13, color: '#888890' }}>Reading image with OCR…</p>
+              </div>
+            ) : rows && (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: '#e8e8ea' }}>{rows.length} transaction{rows.length !== 1 ? 's' : ''} detected</p>
+                  <button onClick={() => { /* allow re-upload while keeping split */ document.getElementById('ocr-file-input-split').click(); }}
+                    style={{ fontSize: 12, color: '#888890', background: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+                    Scan another
+                  </button>
+                  <input id="ocr-file-input-split" type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} onChange={handleFileInput} />
+                </div>
+
+                <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+                        {['', 'Ticker', 'Side', 'Qty', 'Price', 'THB Total', 'Date'].map(h => (
+                          <th key={h} style={{ padding: '9px 10px', textAlign: 'left', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#555558', whiteSpace: 'nowrap' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', opacity: r.selected ? 1 : 0.4 }}>
+                          <td style={{ padding: '7px 10px' }}>
+                            <input type="checkbox" checked={r.selected} onChange={e => setRowField(i, 'selected', e.target.checked)} style={{ cursor: 'pointer', accentColor: '#d4ff00' }} />
+                          </td>
+                          <td style={{ padding: '7px 10px' }}>
+                            <input style={{ ...cellInput, fontWeight: 600, width: 80 }} value={r.ticker} onChange={e => setRowField(i, 'ticker', e.target.value.toUpperCase())} />
+                          </td>
+                          <td style={{ padding: '7px 10px' }}>
+                            <select value={r.side} onChange={e => setRowField(i, 'side', e.target.value)}
+                              style={{ ...cellInput, width: 52, cursor: 'pointer', color: r.side === 'buy' ? '#4ade80' : '#f87171', background: '#18181c', border: 'none' }}>
+                              <option value="buy" style={{ color: '#4ade80', background: '#18181c' }}>buy</option>
+                              <option value="sell" style={{ color: '#f87171', background: '#18181c' }}>sell</option>
+                            </select>
+                          </td>
+                          <td style={{ padding: '7px 10px' }}>
+                            <input type="number" style={{ ...cellInput, width: 60 }} value={r.quantity} onChange={e => setRowField(i, 'quantity', e.target.value)} />
+                          </td>
+                          <td style={{ padding: '7px 10px' }}>
+                            <input type="number" style={{ ...cellInput, width: 72 }} value={r.price} onChange={e => setRowField(i, 'price', e.target.value)} />
+                          </td>
+                          <td style={{ padding: '7px 10px' }}>
+                            <input type="number" style={{ ...cellInput, width: 80 }} value={r.total_amount} onChange={e => setRowField(i, 'total_amount', e.target.value)} />
+                          </td>
+                          <td style={{ padding: '7px 10px', color: '#888890', whiteSpace: 'nowrap', fontSize: 12 }}>{r.trade_date}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {error && <p style={{ fontSize: 13, color: '#f87171', padding: '10px 14px', background: 'rgba(248,113,113,0.08)', borderRadius: 8, border: '1px solid rgba(248,113,113,0.15)' }}>{error}</p>}
+
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
+        <button onClick={onClose} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)', background: 'transparent', color: '#888890', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+        {rows && (
+          <button onClick={handleImport} disabled={importing}
+            style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: importing ? 'rgba(212,255,0,0.5)' : '#d4ff00', color: '#000', fontSize: 13, fontWeight: 700, cursor: importing ? 'not-allowed' : 'pointer' }}>
+            {importing ? 'Importing…' : `Import ${rows.filter(r=>r.selected).length} Trade${rows.filter(r=>r.selected).length !== 1 ? 's' : ''}`}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ── Modal shell with tabs ──
+const AddTransactionModal = ({ onClose, onSuccess }) => {
+  const [tab, setTab] = useState('manual');
+  const tabBtn = (id, label) => (
+    <button key={id} onClick={() => setTab(id)}
+      style={{ padding: '6px 16px', borderRadius: 6, border: 'none', fontSize: 13, fontWeight: 500, cursor: 'pointer', transition: 'all 0.15s',
+        background: tab === id ? 'rgba(255,255,255,0.08)' : 'transparent',
+        color: tab === id ? '#e8e8ea' : '#555558' }}>
+      {label}
+    </button>
+  );
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 24 }}>
+      <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} transition={{ duration: 0.15 }}
+        style={{ background: '#18181c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, width: '100%', maxWidth: tab === 'scan' ? 860 : 480, maxHeight: '90vh', overflowY: 'auto' }}>
+
+        {/* Header */}
+        <div style={{ padding: '18px 24px', borderBottom: '1px solid rgba(255,255,255,0.07)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {tabBtn('manual', 'Manual Entry')}
+            {tabBtn('scan', 'Scan Photo')}
+          </div>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#888890', padding: 4, display: 'flex', borderRadius: 6 }}
+            className="hover:text-white hover:bg-white/5 transition-colors"><X size={16} /></button>
+        </div>
+
+        <AnimatePresence mode="wait">
+          <motion.div key={tab} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }}>
+            {tab === 'manual'
+              ? <ManualForm onClose={onClose} onSuccess={onSuccess} />
+              : <ScanPhotoForm onClose={onClose} onSuccess={onSuccess} />}
+          </motion.div>
+        </AnimatePresence>
+      </motion.div>
+    </div>
+  );
+};
+
+// ─── App Shell ────────────────────────────────────────────────────────────────
+const tabs = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'holdings',  label: 'Holdings',  icon: Briefcase },
+  { id: 'analysis',  label: 'Analysis',  icon: PieChart },
+  { id: 'discovery', label: 'Discovery', icon: Search },
+  { id: 'settings',  label: 'Settings',  icon: Settings },
+];
+
+export default function App() {
+  const [active, setActive] = useState('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [addOpen, setAddOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const handleTransactionSuccess = useCallback(() => setRefreshKey(k => k + 1), []);
+
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh', background: '#0c0c0e', color: '#e8e8ea' }}>
+      <AnimatePresence>
+        {addOpen && <AddTransactionModal onClose={() => setAddOpen(false)} onSuccess={handleTransactionSuccess} />}
+      </AnimatePresence>
+      {/* Sidebar */}
+      <aside style={{ width: sidebarOpen ? 200 : 52, flexShrink: 0, background: '#0f0f11', borderRight: '1px solid rgba(255,255,255,0.07)', display: 'flex', flexDirection: 'column', transition: 'width 0.25s ease', overflow: 'hidden' }}>
+        {/* Logo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px', height: 56, borderBottom: '1px solid rgba(255,255,255,0.07)', flexShrink: 0 }}>
+          <div style={{ width: 28, height: 28, background: '#d4ff00', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#000', fontSize: 11, fontWeight: 900, flexShrink: 0 }}>VI</div>
+          {sidebarOpen && (
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#e8e8ea', lineHeight: 1 }}>VI System</div>
+              <div style={{ fontSize: 10, color: '#555558', marginTop: 3 }}>Intelligence</div>
+            </div>
+          )}
+        </div>
+
+        {/* Nav */}
+        <nav style={{ flex: 1, padding: '10px 8px' }}>
+          {tabs.map(({ id, label, icon: Icon }) => {
+            const isActive = active === id;
             return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`w-full flex items-center gap-5 px-6 py-5 rounded-3xl transition-all duration-300 relative group overflow-hidden ${isActive
-                  ? 'text-black font-black'
-                  : 'text-gray-500 hover:text-white hover:bg-white/5'
-                  }`}
-              >
-                {isActive && (
-                  <motion.div
-                    layoutId="activeTab"
-                    className="absolute inset-0 bg-primary shadow-[0_10px_30px_rgba(212,255,0,0.4)]"
-                    transition={{ type: "spring", bounce: 0.1, duration: 0.6 }}
-                  />
-                )}
-                <Icon size={24} className={`relative z-10 transition-transform duration-300 group-hover:scale-110 ${isActive ? 'text-black' : 'text-gray-500 group-hover:text-primary'}`} />
-                <span className="relative z-10 text-sm font-bold tracking-wide uppercase">{tab.label}</span>
+              <button key={id} onClick={() => setActive(id)}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, marginBottom: 2, cursor: 'pointer', border: 'none', background: isActive ? 'rgba(212,255,0,0.09)' : 'transparent', color: isActive ? '#d4ff00' : '#888890', fontSize: 13, fontWeight: isActive ? 600 : 400, transition: 'all 0.15s', textAlign: 'left', position: 'relative' }}
+                className={isActive ? '' : 'hover:bg-white/5 hover:text-white'}>
+                <Icon size={15} style={{ flexShrink: 0 }} />
+                {sidebarOpen && <span>{label}</span>}
               </button>
             );
           })}
         </nav>
 
-        <div className="p-8 glass rounded-[2.5rem] border-white/5 relative overflow-hidden group">
-          <div className="absolute -right-4 -bottom-4 w-32 h-32 bg-primary/5 rounded-full blur-3xl group-hover:bg-primary/10 transition-colors" />
-          <p className="text-[10px] text-gray-600 uppercase font-black tracking-widest mb-4">Core Status</p>
-          <div className="flex items-center gap-3">
-            <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse shadow-[0_0_15px_rgba(34,197,94,0.6)]" />
-            <span className="text-xs font-black text-gray-400 tracking-wider">SYNCED</span>
-          </div>
+        {/* Status */}
+        <div style={{ padding: '14px 16px', borderTop: '1px solid rgba(255,255,255,0.07)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80', flexShrink: 0, display: 'inline-block' }} />
+          {sidebarOpen && <span style={{ fontSize: 12, color: '#555558' }}>Connected</span>}
         </div>
       </aside>
 
-      {/* Main Content Container */}
-      <main className="flex-1 h-screen overflow-y-auto overflow-x-hidden relative flex flex-col items-center">
-        {/* Header centered with content */}
-        <header className="sticky top-0 z-40 backdrop-blur-3xl border-b border-white/5 px-12 py-8 flex justify-between items-center w-full max-w-[1300px]">
-          <div className="flex items-center gap-8">
-            <button
-              onClick={() => setSidebarOpen(!isSidebarOpen)}
-              className="p-4 hover:bg-white/5 rounded-3xl transition-colors border border-white/10 group"
-            >
-              <Menu size={24} className="text-gray-400 group-hover:text-primary transition-colors" />
+      {/* Main */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+        {/* Header */}
+        <header style={{ height: 56, borderBottom: '1px solid rgba(255,255,255,0.07)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 40px', flexShrink: 0, background: '#0c0c0e' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <button onClick={() => setSidebarOpen(v => !v)}
+              style={{ padding: 6, borderRadius: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: '#888890', display: 'flex' }}
+              className="hover:bg-white/5 hover:text-white transition-colors">
+              <Menu size={16} />
             </button>
-            <div className="h-8 w-[1.5px] bg-white/10" />
-            <h1 className="text-xs font-black text-gray-500 uppercase tracking-[0.4em] select-none">
-              VI <span className="text-white">TERMINAL</span> <span className="text-primary opacity-50 ml-1">v2.1</span>
-            </h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+              <span style={{ color: '#555558' }}>VI Terminal</span>
+              <ChevronRight size={12} color="#333336" />
+              <span style={{ fontWeight: 500, color: '#e8e8ea' }}>{tabs.find(t => t.id === active)?.label}</span>
+            </div>
           </div>
-
-          <div className="flex items-center gap-6">
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="glass px-10 py-4 rounded-[1.5rem] text-[10px] font-black uppercase tracking-[0.2em] border-primary/20 text-primary hover:bg-primary hover:text-black hover:border-primary transition-all flex items-center gap-3 group"
-            >
-              <div className="w-2 h-2 bg-primary group-hover:bg-black rounded-full" />
-              Synchronize
-            </motion.button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button onClick={() => setAddOpen(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: '#000', padding: '6px 14px', borderRadius: 8, border: 'none', background: '#d4ff00', cursor: 'pointer' }}>
+              <Plus size={13} /> Add Trade
+            </button>
+            <button style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#888890', padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)', cursor: 'pointer' }}
+              className="hover:text-white hover:border-white/15 hover:bg-white/5 transition-colors">
+              <RefreshCw size={12} /> Sync
+            </button>
           </div>
         </header>
 
-        <div className="p-12 w-full max-w-[1300px] min-h-[calc(100vh-112px)]">
+        {/* Content */}
+        <main style={{ flex: 1, overflowY: 'auto', padding: '36px 40px' }}>
+          <div style={{ marginBottom: 24 }}>
+            <h1 style={{ fontSize: 20, fontWeight: 600, color: '#e8e8ea' }}>{tabs.find(t => t.id === active)?.label}</h1>
+          </div>
+
           <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.4, ease: "circOut" }}
-            >
-              {activeTab === 'dashboard' && <Dashboard />}
-              {activeTab === 'holdings' && <Holdings />}
-              {activeTab === 'analysis' && <Analysis />}
-              {activeTab === 'discovery' && <Discovery />}
-              {activeTab === 'more' && (
-                <div className="space-y-10">
-                  <h2 className="text-4xl font-extrabold tracking-tight">Settings</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="glass p-10 rounded-[2.5rem] border-white/5 space-y-6">
-                      <h3 className="text-xl font-bold">Data Management</h3>
-                      <p className="text-gray-400 text-sm leading-relaxed">Refresh your local portfolio engine and clear calculated caches.</p>
-                      <div className="space-y-3">
-                        <button className="w-full bg-white/5 border border-white/5 p-5 rounded-3xl text-left hover:bg-white/10 hover:border-white/10 transition-all font-bold text-sm">
-                          🔄 Sync All Transactions
-                        </button>
-                        <button className="w-full bg-red-400/5 border border-red-400/10 p-5 rounded-3xl text-left hover:bg-red-400/10 transition-all font-bold text-sm text-red-400">
-                          🧹 Purge Financial Cache
-                        </button>
-                      </div>
+            <motion.div key={active} {...fade}>
+              {active === 'dashboard' && <Dashboard refreshKey={refreshKey} />}
+              {active === 'holdings'  && <Holdings refreshKey={refreshKey} />}
+              {active === 'analysis'  && <Analysis />}
+              {active === 'discovery' && <Discovery />}
+              {active === 'settings'  && (
+                <div style={{ maxWidth: 420 }}>
+                  <div className="card rounded-xl" style={{ padding: '24px 28px' }}>
+                    <p style={{ fontSize: 14, fontWeight: 600, color: '#e8e8ea', marginBottom: 8 }}>Data Management</p>
+                    <p style={{ fontSize: 13, color: '#888890', lineHeight: 1.6, marginBottom: 16 }}>Refresh local portfolio data or clear cached calculations.</p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <button style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)', color: '#e8e8ea', cursor: 'pointer' }}
+                        className="hover:bg-white/5 transition-colors">
+                        Sync All Transactions
+                      </button>
+                      <button style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, borderRadius: 8, border: '1px solid rgba(248,113,113,0.15)', background: 'rgba(248,113,113,0.05)', color: '#f87171', cursor: 'pointer' }}
+                        className="hover:bg-red-500/10 transition-colors">
+                        Purge Financial Cache
+                      </button>
                     </div>
                   </div>
                 </div>
               )}
             </motion.div>
           </AnimatePresence>
-        </div>
-      </main>
+        </main>
+      </div>
     </div>
   );
-};
-
-export default App;
+}

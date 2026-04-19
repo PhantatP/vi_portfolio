@@ -1,5 +1,8 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional, List
+from datetime import date as dt_date
 import pandas as pd
 import sys
 import os
@@ -10,6 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.portfolio import build_portfolio_view_thb, get_holdings_df
 from core.analysis import get_rebalancing_needs, get_hierarchical_distribution, get_smart_picks, get_all_sector_peers
 from core.research import get_basic_info, get_price_history, get_income_funnel
+from core.transactions import add_transaction, rebuild_holdings_from_transactions, upsert_asset_if_missing
 
 app = FastAPI(title="VI Portfolio API")
 
@@ -31,7 +35,7 @@ def get_dashboard():
     try:
         df, total_val = build_portfolio_view_thb()
         if df.empty:
-            return {"total_val": 0, "holdings": [], "stats": {}}
+            return {"total_val": 0, "total_cost": 0, "total_profit": 0, "profit_pct": 0, "top_gainer": None, "worst_loser": None, "holdings": [], "allocation": {}, "stats": {}}
         
         total_cost = df["cost_thb_total"].sum()
         total_profit = df["unrealized_pl_thb"].sum()
@@ -95,6 +99,96 @@ def get_stock_research(ticker: str):
             "history": history,
             "funnel": funnel
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class TransactionIn(BaseModel):
+    ticker: str
+    side: str
+    quantity: float
+    price_per_share: Optional[float] = None
+    price_ccy: str = "THB"
+    broker: str = "Other"
+    trade_date: Optional[str] = None
+    fee: float = 0.0
+    fee_ccy: Optional[str] = None
+    thb_amount: Optional[float] = None
+    usd_amount: Optional[float] = None
+    fx_thb_per_usd: Optional[float] = None
+
+@app.post("/api/transactions")
+def post_transaction(tx: TransactionIn):
+    try:
+        trade_date = tx.trade_date or str(dt_date.today())
+        ticker = tx.ticker.strip().upper()
+        upsert_asset_if_missing(ticker)
+        add_transaction(
+            ticker=ticker,
+            broker=tx.broker,
+            trade_date=trade_date,
+            side=tx.side,
+            quantity=tx.quantity,
+            price_per_share=tx.price_per_share,
+            price_ccy=tx.price_ccy,
+            fee=tx.fee,
+            fee_ccy=tx.fee_ccy,
+            thb_amount=tx.thb_amount,
+            usd_amount=tx.usd_amount,
+            fx_thb_per_usd=tx.fx_thb_per_usd,
+        )
+        rebuild_holdings_from_transactions()
+        return {"status": "ok", "ticker": ticker}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/ocr/parse")
+async def ocr_parse(file: UploadFile = File(...)):
+    try:
+        from core.ocr_parser import parse_dime_image
+        image_bytes = await file.read()
+        parsed = parse_dime_image(image_bytes)
+        return {"transactions": parsed}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class BulkTransactionIn(BaseModel):
+    transactions: List[TransactionIn]
+
+@app.post("/api/ocr/import")
+def ocr_import(body: BulkTransactionIn):
+    try:
+        count = 0
+        for tx in body.transactions:
+            ticker = tx.ticker.strip().upper()
+            if not ticker:
+                continue
+            upsert_asset_if_missing(ticker)
+            add_transaction(
+                ticker=ticker,
+                broker=tx.broker,
+                trade_date=tx.trade_date or str(dt_date.today()),
+                side=tx.side,
+                quantity=tx.quantity,
+                price_per_share=tx.price_per_share,
+                price_ccy=tx.price_ccy,
+                fee=tx.fee,
+                fee_ccy=tx.fee_ccy,
+                thb_amount=tx.thb_amount,
+                usd_amount=tx.usd_amount,
+                fx_thb_per_usd=tx.fx_thb_per_usd,
+            )
+            count += 1
+        rebuild_holdings_from_transactions()
+        return {"status": "ok", "imported": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/assets")
+def get_assets():
+    try:
+        df = get_holdings_df()
+        tickers = df["ticker"].tolist() if not df.empty else []
+        return {"tickers": tickers}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

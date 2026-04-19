@@ -5,3 +5,7 @@ plotly
 easyocr
 numpy
 torch
+fastapi
+uvicorn
+pydantic
+python-multipart
