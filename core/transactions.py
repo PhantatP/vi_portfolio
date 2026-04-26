@@ -77,7 +77,7 @@ def add_transaction(
         fee_ccy = price_ccy
 
     # convenience: compute usd_amount if not provided
-    if usd_amount is None and price_per_share is not None and price_ccy.upper().startswith("USD"):
+    if usd_amount is None and price_per_share is not None and str(price_ccy or "").upper().startswith("USD"):
         usd_amount = float(price_per_share) * float(quantity)
 
     # infer FX if not provided and we have both THB and USD notionals
@@ -133,8 +133,8 @@ def _thb_notional_for_row(row: pd.Series, fallback_fx: float | None) -> float:
     qty = row.get("quantity")
     price = row.get("price")
     fee = row.get("fee")
-    fee_ccy = (row.get("fee_ccy") or row.get("currency") or "").upper()
-    price_ccy = (row.get("price_ccy") or row.get("currency") or "").upper()
+    fee_ccy = str(row.get("fee_ccy") or row.get("currency") or "").upper()
+    price_ccy = str(row.get("price_ccy") or row.get("currency") or "").upper()
 
     # Normalize numerics
     qty = float(qty) if pd.notna(qty) else 0.0

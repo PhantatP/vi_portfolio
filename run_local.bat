@@ -1,6 +1,7 @@
 @echo off
 setlocal
 set PATH=%PATH%;C:\Program Files\nodejs
+set VI_DB_PATH=C:\Users\Phantat\OneDrive\vi_portfolio\db\vi_portfolio.db
 
 echo 🚀 Starting VI Portfolio (Modern Refactor)
 echo.
@@ -15,7 +16,7 @@ timeout /t 3 /nobreak > nul
 :: Start Frontend
 echo [2/2] Starting Frontend (Vite)...
 cd frontend
-start "VI Portfolio UI" cmd /c "npx vite"
+start "VI Portfolio UI" cmd /c "npx vite --host"
 
 echo.
 echo ✨ Application is starting! 

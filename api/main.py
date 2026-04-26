@@ -222,6 +222,28 @@ def transactions_exist(items: List[TxCheckItem]):
     conn.close()
     return {"existing": existing}
 
+@app.get("/api/debug/transactions")
+def debug_transactions():
+    from core.db import get_connection
+    import math
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT a.ticker, t.trade_date, t.side, t.quantity, t.price, t.price_ccy,
+               t.thb_amount, t.usd_amount, t.fx_thb_per_usd
+        FROM transactions t JOIN assets a ON a.id = t.asset_id
+        ORDER BY t.trade_date DESC LIMIT 50
+    """)
+    cols = [d[0] for d in cur.description]
+    rows = []
+    for r in cur.fetchall():
+        row = {}
+        for k, v in zip(cols, r):
+            row[k] = None if (isinstance(v, float) and math.isnan(v)) else v
+        rows.append(row)
+    conn.close()
+    return rows
+
 @app.get("/api/assets")
 def get_assets():
     try:

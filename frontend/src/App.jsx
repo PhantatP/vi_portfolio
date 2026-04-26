@@ -152,7 +152,7 @@ const Holdings = ({ refreshKey }) => {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14, minWidth: 580 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-              {['Ticker','Qty','Avg Cost','Market Value','P/L'].map((h, i) => (
+              {['Ticker','Qty','Avg Cost (USD)','Cost (฿)','Market Value','P/L'].map((h, i) => (
                 <th key={h} style={{ padding: '14px 20px', textAlign: i === 0 ? 'left' : 'right', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#555558', whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
@@ -160,7 +160,7 @@ const Holdings = ({ refreshKey }) => {
           <tbody>
             {holdings.length === 0 && (
               <tr>
-                <td colSpan={5} style={{ padding: '48px 20px', textAlign: 'center', fontSize: 13, color: '#555558' }}>
+                <td colSpan={6} style={{ padding: '48px 20px', textAlign: 'center', fontSize: 13, color: '#555558' }}>
                   No holdings yet. Add your first position to get started.
                 </td>
               </tr>
@@ -178,8 +178,9 @@ const Holdings = ({ refreshKey }) => {
                       <span style={{ fontWeight: 600, color: '#e8e8ea' }}>{h.ticker}</span>
                     </div>
                   </td>
-                  <td style={{ padding: '14px 20px', textAlign: 'right', color: '#888890', fontVariantNumeric: 'tabular-nums' }}>{h.total_quantity?.toLocaleString()}</td>
-                  <td style={{ padding: '14px 20px', textAlign: 'right', color: '#888890' }}>฿{h.avg_price_thb?.toLocaleString()}</td>
+                  <td style={{ padding: '14px 20px', textAlign: 'right', color: '#888890', fontVariantNumeric: 'tabular-nums' }}>{h.quantity?.toLocaleString(undefined, { maximumFractionDigits: 6 })}</td>
+                  <td style={{ padding: '14px 20px', textAlign: 'right', color: '#888890' }}>${h.usd_thb ? fmt(h.avg_cost_thb / h.usd_thb, 2) : '—'}</td>
+                  <td style={{ padding: '14px 20px', textAlign: 'right', color: '#888890' }}>฿{fmt(h.cost_thb_total)}</td>
                   <td style={{ padding: '14px 20px', textAlign: 'right', fontWeight: 600, color: '#e8e8ea' }}>฿{fmt(h.value_thb)}</td>
                   <td style={{ padding: '14px 20px', textAlign: 'right' }}>
                     <div style={{ fontWeight: 600, color: pl >= 0 ? '#4ade80' : '#f87171', fontVariantNumeric: 'tabular-nums' }}>
@@ -866,9 +867,15 @@ const ScanPhotoForm = ({ onClose, onSuccess }) => {
                   )}
                   {focusedBatch.status === 'done' && (() => {
                     const batchRows = allRows.filter(r => r._batchId === focusedBatch.id);
+                    const missingDateCount = batchRows.filter(r => !r.trade_date).length;
                     return (
                       <>
                         <p style={{ fontSize: 13, fontWeight: 600, color: '#e8e8ea' }}>{batchRows.length} transaction{batchRows.length !== 1 ? 's' : ''} detected</p>
+                        {missingDateCount > 0 && (
+                          <p style={{ fontSize: 12, color: '#fb923c', padding: '8px 12px', background: 'rgba(251,146,60,0.08)', borderRadius: 8, border: '1px solid rgba(251,146,60,0.2)' }}>
+                            ⚠ Date not detected for {missingDateCount} transaction{missingDateCount !== 1 ? 's' : ''} — please fill in manually.
+                          </p>
+                        )}
                         <TxTable rows={batchRows} showBadge={false} onField={onField} />
                       </>
                     );
@@ -882,6 +889,14 @@ const ScanPhotoForm = ({ onClose, onSuccess }) => {
               <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   <p style={{ fontSize: 13, fontWeight: 600, color: '#e8e8ea' }}>{allRows.length} total transactions</p>
+                  {allRows.filter(r => !r.trade_date).length > 0 && (() => {
+                    const n = allRows.filter(r => !r.trade_date).length;
+                    return (
+                      <span style={{ fontSize: 12, color: '#fb923c', padding: '3px 10px', background: 'rgba(251,146,60,0.08)', borderRadius: 6, border: '1px solid rgba(251,146,60,0.2)' }}>
+                        ⚠ Date missing on {n} transaction{n !== 1 ? 's' : ''}
+                      </span>
+                    );
+                  })()}
                   {dupCount > 0 && (() => {
                     const dbDupCount = allRows.filter(r => r._dbDup).length;
                     const sessionDupCount = dupCount - dbDupCount;
