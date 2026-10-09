@@ -18,3 +18,9 @@ __pycache__
 .env.dev.example
 node_modules/
 fix/
+samples/
+.venv.broken
+.claude/
+CLAUDE.md
+config/
+graphify-out/
