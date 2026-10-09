@@ -21,8 +21,8 @@ python app/cli.py add-holding --ticker CPALL.BK --broker SCB --quantity 500 --av
 # 4) Show portfolio (with yfinance prices)
 python app/cli.py portfolio
 
-# 5) Run the minimal web app
-streamlit run app/web_app.py
+# 5) Run the API + React frontend
+bash run_local.sh
 ```
 
 ## Dime import (no screenshots)
@@ -81,4 +81,3 @@ Edit and run `scripts/backup_db.sh`, then set a cron job to copy the DB file to 
 - Add research functions (business model, notes)
 - Add FX conversion
 - Add scoring (Quality / Valuation / Country)
-- Build richer Streamlit pages

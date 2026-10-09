@@ -1,7 +1,5 @@
 pandas
 yfinance
-streamlit
-plotly
 easyocr
 numpy
 torch
