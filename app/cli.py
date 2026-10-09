@@ -57,6 +57,8 @@ def dime_sync(args):
     from core.dime_import import sync_from_gmail, import_paths
     summary = import_paths(args.files, args.dry_run) if args.files else sync_from_gmail(args.dry_run)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
+    if summary["totals"]["errors"]:
+        raise SystemExit(1)  # lets the systemd timer / callers see a failed sync
 
 def dime_reconcile(args):
     from core.dime_import import latest_statement, reconcile

@@ -48,9 +48,29 @@ python app/cli.py dime-reconcile         # DB share counts vs the latest Dime st
 ```
 
 API: `POST /api/import/dime/sync?dry_run=true`, `GET /api/import/dime/reconcile`.
+`dime-sync` exits with code 1 if any file failed to import.
 Re-running is safe: orders are de-duplicated by Dime's order id, and rows typed in earlier
 from screenshots are matched and corrected instead of duplicated. Dividends are not in these
 PDFs, so they still need to be entered separately.
+
+## Run as Linux services (Jetson)
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+(cd frontend && npm install)
+bash scripts/install_services.sh                     # daily Dime sync at 09:00
+bash scripts/install_services.sh --sync-time 07:30   # or pick a time (system timezone)
+bash scripts/install_services.sh --uninstall
+```
+
+Run it as your normal user (it calls `sudo` itself). Needs Node.js 20+. It installs and (re)starts
+`vi-portfolio-api` (:8000), `vi-portfolio-ui` (:5173) and `vi-portfolio-dime-sync.timer`;
+re-run it after `git pull` so the services pick up the new code. Don't run `run_local.sh` at the same time.
+On a fresh device, copy `db/vi_portfolio.db`, `.env` and `secrets/` over first (or run `python -m core.db_init`).
+
+Missed syncs (device off) run at next boot. Check results with
+`journalctl -u vi-portfolio-dime-sync -n 100`; sync now with `sudo systemctl start vi-portfolio-dime-sync`.
+A PDF that fails to import is retried every day and marks the sync unit as failed (`systemctl --failed`).
 
 ## Backup
 
