@@ -1,7 +1,7 @@
 @echo off
 setlocal
 set PATH=%PATH%;C:\Program Files\nodejs
-set VI_DB_PATH=C:\Users\Phantat\OneDrive\vi_portfolio\db\vi_portfolio.db
+set VI_DB_PATH=%~dp0db\vi_portfolio.db
 
 echo 🚀 Starting VI Portfolio (Modern Refactor)
 echo.
