@@ -207,8 +207,9 @@ def import_files(files: list[tuple[str, bytes]], dry_run: bool = False) -> dict:
         if not dry_run:
             _record_file(filename, kind, status, detail)
 
-    # Always rebuild after real note imports: an earlier run may have written rows and then failed
-    if not dry_run and any(file_kind(f[0]) == "confirmation_note" for f in files):
+    # Always rebuild after real imports: an earlier run may have written rows and then failed,
+    # and a new statement re-anchors avg costs
+    if not dry_run and files:
         rebuild_holdings_from_transactions()
 
     statement = max(statements, key=lambda s: s["as_of"], default=None) or latest_statement()

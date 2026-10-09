@@ -1,5 +1,6 @@
 """Dime PDF parsing + import. Fixtures mimic pypdf's text layout with made-up values."""
 import io
+import json
 import sqlite3
 
 import pytest
@@ -281,3 +282,44 @@ def test_reconcile(db):
     rec = dime_import.reconcile(parse_monthly_statement(STATEMENT))
     assert not rec["matches"]
     assert rec["mismatches"] == [{"ticker": "VOO", "dime_shares": 0.5, "db_shares": 0.0, "diff": 0.5}]
+
+
+def _holding(path, ticker):
+    con = sqlite3.connect(path)
+    row = con.execute("""SELECT h.quantity, h.avg_price FROM holdings h JOIN assets a ON a.id = h.asset_id
+                         WHERE a.ticker = ?""", (ticker,)).fetchone()
+    con.close()
+    return row
+
+
+def test_statement_avg_cost_overrides_computed_cost(db):
+    # Dime moved AAPL's avg cost to 150 after a partial sell; moving average would keep 125
+    add = core.transactions.add_transaction
+    add(ticker="AAPL", broker="Dime", trade_date="2026-08-01", side="buy", quantity=1.0,
+        price_per_share=100.0, price_ccy="USD", thb_amount=3300.0)
+    add(ticker="AAPL", broker="Dime", trade_date="2026-08-15", side="buy", quantity=1.0,
+        price_per_share=150.0, price_ccy="USD", thb_amount=4950.0)
+    add(ticker="AAPL", broker="Dime", trade_date="2026-09-11", side="sell", quantity=1.0,
+        price_per_share=200.0, price_ccy="USD")
+    dime_import._record_file("Dime_monthly_statement_x.pdf", "monthly_statement", "ok",
+                             json.dumps(parse_monthly_statement(STATEMENT)))
+    core.transactions.rebuild_holdings_from_transactions()
+    qty, avg_thb = _holding(db, "AAPL")
+    assert qty == pytest.approx(1.0) and avg_thb == pytest.approx(4125.0 * 150 / 125)
+
+    # trades after the statement average on top of Dime's cost
+    add(ticker="AAPL", broker="Dime", trade_date="2026-10-02", side="buy", quantity=1.0,
+        price_per_share=250.0, price_ccy="USD", thb_amount=8250.0)
+    core.transactions.rebuild_holdings_from_transactions()
+    qty, avg_thb = _holding(db, "AAPL")
+    assert qty == pytest.approx(2.0) and avg_thb == pytest.approx((4950.0 + 8250.0) / 2)
+
+
+def test_statement_with_different_qty_is_not_used_as_anchor(db):
+    # an unsettled trade means Dime's count differs; keep the computed cost
+    core.transactions.add_transaction(ticker="VOO", broker="Dime", trade_date="2026-09-30", side="buy",
+                                      quantity=0.7, price_per_share=500.0, price_ccy="USD", thb_amount=11550.0)
+    dime_import._record_file("Dime_monthly_statement_x.pdf", "monthly_statement", "ok",
+                             json.dumps(parse_monthly_statement(STATEMENT)))
+    core.transactions.rebuild_holdings_from_transactions()
+    assert _holding(db, "VOO")[1] == pytest.approx(11550.0 / 0.7)

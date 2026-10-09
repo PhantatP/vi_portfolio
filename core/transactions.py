@@ -3,6 +3,7 @@ from .db import get_connection
 from .db_init import ensure_import_schema
 from .fx import fetch_usd_thb_rate
 from .symbols import detect_asset_profile
+import json
 import pandas as pd
 import numpy as np
 
@@ -171,6 +172,30 @@ def _thb_notional_for_row(row: pd.Series, fallback_fx: float | None) -> float:
 
     return float(base_thb)
 
+STATEMENT_QTY_TOLERANCE = 1e-5  # same as dime_import.QTY_TOLERANCE
+
+def _usd_notional_for_row(row: pd.Series) -> float:
+    """USD cost of a buy excluding fees, the basis Dime's statements use for avg cost."""
+    usd = row.get("usd_amount")
+    if pd.notna(usd):
+        return float(usd)
+    price = row.get("price")
+    if pd.notna(price) and str(row.get("price_ccy") or row.get("currency") or "").upper().startswith("USD"):
+        return float(price) * float(row["quantity"])
+    return 0.0
+
+def _dime_statements() -> list[dict]:
+    """Imported Dime monthly statements, oldest first, holdings keyed by ticker."""
+    ensure_import_schema()
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT detail FROM imported_files WHERE kind = 'monthly_statement' AND status = 'ok'"
+    ).fetchall()
+    conn.close()
+    statements = [json.loads(r[0]) for r in rows]
+    return [{"as_of": s["as_of"], "holdings": {h["ticker"]: h for h in s["holdings"]}}
+            for s in sorted(statements, key=lambda s: s["as_of"])]
+
 def rebuild_holdings_from_transactions() -> pd.DataFrame:
     """
     Rebuild holdings (qty + THB avg cost) per (ticker, broker) using moving-average:
@@ -189,28 +214,47 @@ def rebuild_holdings_from_transactions() -> pd.DataFrame:
     fallback_fx = fetch_usd_thb_rate()
     tx["_thb_notional"] = tx.apply(lambda r: _thb_notional_for_row(r, fallback_fx), axis=1)
 
+    statements = _dime_statements()
+
     results = []
     # Group by asset_id instead of ticker string to support manual edits/merges in DB
     for (asset_id, broker), g in tx.groupby(["asset_id", "broker"]):
         qty = 0.0
         avg_thb = 0.0
+        avg_usd = 0.0
         # Get ticker from the group (all have same ticker from assets table)
         ticker = g["asset_ticker"].iloc[0]
-        
+        anchors = statements if broker == "Dime" else []
+        next_anchor = 0
+
+        def anchor_to(as_of_limit):
+            # Dime's month-end avg cost is the source of truth: its cost method on partial sells
+            # isn't plain moving average or FIFO. Rescale THB by the same ratio to keep historic FX.
+            nonlocal next_anchor, avg_thb, avg_usd
+            while next_anchor < len(anchors) and anchors[next_anchor]["as_of"] < as_of_limit:
+                h = anchors[next_anchor]["holdings"].get(ticker)
+                next_anchor += 1
+                if h and avg_usd > 0 and abs(h["shares"] - qty) <= STATEMENT_QTY_TOLERANCE:
+                    avg_thb *= h["avg_cost_usd"] / avg_usd
+                    avg_usd = h["avg_cost_usd"]
+
         for _, r in g.sort_values(["trade_date", "id"]).iterrows():
+            anchor_to(r["trade_date"])
             side = str(r["side"]).lower().strip()
             q = float(r["quantity"]) if pd.notna(r["quantity"]) else 0.0
             thb = float(r["_thb_notional"]) if pd.notna(r["_thb_notional"]) else 0.0
             if side == "buy":
                 new_qty = qty + q
                 if new_qty <= 0:
-                    qty, avg_thb = 0.0, 0.0
+                    qty, avg_thb, avg_usd = 0.0, 0.0, 0.0
                 else:
                     total_cost = (avg_thb * qty) + thb
                     avg_thb = total_cost / new_qty
+                    avg_usd = (avg_usd * qty + _usd_notional_for_row(r)) / new_qty
                     qty = new_qty
             elif side == "sell":
                 qty = max(0.0, qty - q)
+        anchor_to("9999-12-31")
         results.append({
             "asset_id": int(asset_id), 
             "ticker": ticker, 
