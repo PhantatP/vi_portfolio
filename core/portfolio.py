@@ -1,5 +1,7 @@
 from .db import get_connection
 from .fx import fetch_usd_thb_rate
+from .prices import latest_prices
+from datetime import date
 import pandas as pd
 import yfinance as yf
 import numpy as np
@@ -18,43 +20,47 @@ def _pick_price_column(df):
         return df.tail(1)
     return None
 
-def fetch_latest_prices(tickers):
+def _fetch_live_price(t):
     """
-    Stable price fetcher:
+    Live yfinance price, for tickers the refresh job hasn't stored yet:
     1) Try fast_info.last_price
     2) Try .history Close
-    Always returns DataFrame with ['ticker','price'].
+    """
+    # 1) fast_info
+    try:
+        fi = yf.Ticker(t).fast_info
+        lp = fi.get("last_price")
+        if lp:
+            return float(lp)
+    except Exception:
+        pass
+
+    # 2) history close
+    try:
+        h = yf.Ticker(t).history(period="1d")
+        if "Close" in h.columns and len(h) > 0:
+            return float(h["Close"].iloc[-1])
+    except Exception:
+        pass
+    return None
+
+def fetch_latest_prices(tickers):
+    """
+    Latest stored close (core/prices.py); live yfinance only for tickers with no stored prices.
+    Always returns DataFrame with ['ticker','price','as_of'].
     """
     tickers = [t.upper() for t in tickers if t]
-    rows = []
+    stored = latest_prices(tickers)
+    rows = stored.to_dict("records")
 
-    for t in tickers:
-        price = None
-
-        # 1) fast_info
-        try:
-            fi = yf.Ticker(t).fast_info
-            lp = fi.get("last_price")
-            if lp:
-                price = float(lp)
-        except Exception:
-            pass
-
-        # 2) history close
-        if price is None:
-            try:
-                h = yf.Ticker(t).history(period="1d")
-                if "Close" in h.columns and len(h) > 0:
-                    price = float(h["Close"].iloc[-1])
-            except Exception:
-                pass
-
+    for t in sorted(set(tickers) - set(stored["ticker"])):
+        price = _fetch_live_price(t)
         if price is not None:
-            rows.append({"ticker": t, "price": price})
+            rows.append({"ticker": t, "price": price, "as_of": date.today().isoformat()})
 
     # Always return DataFrame with correct columns
     if not rows:
-        return pd.DataFrame({ "ticker": tickers, "price": [np.nan]*len(tickers) })
+        return pd.DataFrame({ "ticker": tickers, "price": [np.nan]*len(tickers), "as_of": [None]*len(tickers) })
 
     return pd.DataFrame(rows)
 

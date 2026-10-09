@@ -67,11 +67,33 @@ def dime_reconcile(args):
         raise SystemExit("No Dime monthly statement imported yet.")
     print(json.dumps(reconcile(statement), indent=2, ensure_ascii=False))
 
+def prices_refresh(args):
+    from core.prices import refresh_prices
+    summary = refresh_prices()
+    print(json.dumps(summary, indent=2))
+    if summary["status"] != "ok":
+        raise SystemExit(1)  # lets the systemd timer show a failed refresh
+
+def watch_add(args):
+    from core.prices import add_to_watchlist
+    t = add_to_watchlist(args.ticker, args.reason)
+    print(f"Watching {t}. Prices are fetched on the next `cli.py prices-refresh`.")
+
+def watch_remove(args):
+    from core.prices import remove_from_watchlist
+    if not remove_from_watchlist(args.ticker):
+        raise SystemExit(f"{args.ticker} is not on the watchlist.")
+    print(f"Removed {args.ticker.upper()} (stored price history is kept).")
+
+def watch_list(args):
+    from core.prices import list_watchlist
+    print(json.dumps(list_watchlist(), indent=2))
+
 def main():
     p = argparse.ArgumentParser(prog="cli.py", description="VI Portfolio CLI")
     sub = p.add_subparsers()
 
-    sp = sub.add_parser("init-db", help="Create tables if they don't exist")
+    sp = sub.add_parser("init-db", help="Create the DB or apply pending schema migrations")
     sp.set_defaults(func=init)
 
     sp = sub.add_parser("add-asset", help="Add or update an asset master record")
@@ -106,6 +128,21 @@ def main():
 
     sp = sub.add_parser("dime-reconcile", help="Compare DB holdings with the latest Dime statement")
     sp.set_defaults(func=dime_reconcile)
+
+    sp = sub.add_parser("prices-refresh", help="Store daily prices for held + watched tickers (backfills new ones)")
+    sp.set_defaults(func=prices_refresh)
+
+    sp = sub.add_parser("watch-add", help="Track a ticker's prices without holding it")
+    sp.add_argument("ticker", help="Yahoo symbol, e.g. CPALL.BK or ^GSPC")
+    sp.add_argument("--reason", default=None)
+    sp.set_defaults(func=watch_add)
+
+    sp = sub.add_parser("watch-remove", help="Stop tracking a watched ticker")
+    sp.add_argument("ticker")
+    sp.set_defaults(func=watch_remove)
+
+    sp = sub.add_parser("watch-list", help="Show the watchlist with each ticker's latest stored price date")
+    sp.set_defaults(func=watch_list)
 
     args = p.parse_args()
     if hasattr(args, "func"):

@@ -194,7 +194,7 @@ def test_wrong_pdf_password():
 def db(tmp_path, monkeypatch):
     path = tmp_path / "test.db"
     monkeypatch.setattr(core.db, "DB_PATH", path)
-    monkeypatch.setattr(core.db_init, "_import_schema_ready", False)
+    monkeypatch.setattr(core.db_init, "_schema_ready", False)
     monkeypatch.setattr(core.transactions, "detect_asset_profile", lambda t: {})
     monkeypatch.setattr(core.transactions, "fetch_usd_thb_rate", lambda: 33.0)
     core.db_init.init_db()

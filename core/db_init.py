@@ -60,15 +60,50 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 """
 
-_import_schema_ready = False
+BENCHMARKS = ("^SET.BK", "^GSPC", "^IXIC")  # SET, S&P 500, NASDAQ Composite
 
-def ensure_import_schema():
-    """Idempotent: columns/tables used by broker document imports (core/dime_import.py)."""
-    global _import_schema_ready
-    if _import_schema_ready:
-        return
-    conn = get_connection()
-    cur = conn.cursor()
+MARKET_DATA_SQL = """
+CREATE TABLE IF NOT EXISTS watchlist (
+    ticker TEXT PRIMARY KEY,        -- Yahoo symbol, upper case
+    reason TEXT,
+    added_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- One row per ticker per trading day. close is Yahoo's Close: split-adjusted, NOT dividend-adjusted.
+-- Today's row is overwritten by each refresh until the day is over.
+CREATE TABLE IF NOT EXISTS price_daily (
+    ticker TEXT NOT NULL,
+    date TEXT NOT NULL,             -- YYYY-MM-DD, exchange-local trading date
+    close REAL NOT NULL,
+    volume REAL,
+    source TEXT NOT NULL,           -- yfinance
+    fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (ticker, date)
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS corporate_actions (
+    ticker TEXT NOT NULL,
+    date TEXT NOT NULL,             -- ex-date, YYYY-MM-DD
+    type TEXT NOT NULL,             -- dividend (cash per share) / split (ratio, e.g. 4.0 for 4:1)
+    value REAL NOT NULL,
+    source TEXT NOT NULL,
+    fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (ticker, date, type)
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS job_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job TEXT NOT NULL,              -- e.g. prices_refresh
+    started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TEXT,
+    status TEXT NOT NULL,           -- running / ok / error
+    detail TEXT                     -- JSON summary or error message
+);
+"""
+
+def _m1_baseline(cur):
+    """Schema from before numbered migrations; also brings old, unversioned DBs up to it."""
+    cur.executescript(SCHEMA_SQL)
     cur.execute("PRAGMA table_info(transactions);")
     if not any(r[1] == "external_id" for r in cur.fetchall()):
         cur.execute("ALTER TABLE transactions ADD COLUMN external_id TEXT;")  # broker's own order id
@@ -83,17 +118,33 @@ def ensure_import_schema():
             imported_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
     """)
-    conn.commit()
-    conn.close()
-    _import_schema_ready = True
+
+def _m2_market_data(cur):
+    """Stored prices for held + watched tickers (core/prices.py)."""
+    cur.executescript(MARKET_DATA_SQL)
+    cur.executemany("INSERT OR IGNORE INTO watchlist (ticker, reason) VALUES (?, 'benchmark');",
+                    [(t,) for t in BENCHMARKS])
+
+# Append-only: never edit or reorder a step that has shipped. PRAGMA user_version = steps applied.
+# Steps must be idempotent, since a crash between a step and its version bump re-runs it.
+MIGRATIONS = [_m1_baseline, _m2_market_data]
+
+_schema_ready = False
 
 def init_db():
+    """Apply pending migrations. Cheap after the first call in a process."""
+    global _schema_ready
+    if _schema_ready:
+        return
     conn = get_connection()
-    cur = conn.cursor()
-    cur.executescript(SCHEMA_SQL)
-    conn.commit()
+    conn.execute("PRAGMA journal_mode=WAL;")  # persistent: readers don't block the price refresh writer
+    version = conn.execute("PRAGMA user_version;").fetchone()[0]
+    for n, step in enumerate(MIGRATIONS[version:], start=version + 1):
+        step(conn.cursor())
+        conn.execute(f"PRAGMA user_version = {n};")
+        conn.commit()
     conn.close()
-    ensure_import_schema()
+    _schema_ready = True
 
 if __name__ == "__main__":
     init_db()

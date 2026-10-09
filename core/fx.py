@@ -1,14 +1,28 @@
+from datetime import date, timedelta
+
 import yfinance as yf
+
+from .prices import USD_THB, latest_prices
+
+MAX_STORED_AGE_DAYS = 7  # older means the refresh job stopped; prefer a live rate
 
 def fetch_usd_thb_rate(default: float = 36.0) -> float:
     """
     Return a reliable USD→THB rate.
     Uses:
-      1) fast_info.last_price  
-      2) history Close price  
-      3) fallback default  
+      0) latest stored close (core/prices.py), if recent
+      1) fast_info.last_price
+      2) history Close price
+      3) stale stored close
+      4) fallback default
     Never returns None.
     """
+
+    # 0) Stored by the price refresh job
+    stored = latest_prices([USD_THB])
+    stored_rate = float(stored["price"].iloc[0]) if not stored.empty else None
+    if stored_rate and date.fromisoformat(stored["as_of"].iloc[0]) >= date.today() - timedelta(days=MAX_STORED_AGE_DAYS):
+        return stored_rate
 
     # 1) Try fast_info (most reliable)
     try:
@@ -27,5 +41,9 @@ def fetch_usd_thb_rate(default: float = 36.0) -> float:
     except Exception:
         pass
 
-    # 3) Hard fallback
+    # 3) Stale stored rate beats a hard-coded one
+    if stored_rate:
+        return stored_rate
+
+    # 4) Hard fallback
     return default

@@ -17,6 +17,6 @@ DB_PATH = Path(os.path.expanduser(
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)  # wait out another process's write (e.g. price refresh)
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn

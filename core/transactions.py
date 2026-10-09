@@ -1,6 +1,6 @@
 # core/transactions.py
 from .db import get_connection
-from .db_init import ensure_import_schema
+from .db_init import init_db
 from .fx import fetch_usd_thb_rate
 from .symbols import detect_asset_profile
 import json
@@ -65,7 +65,7 @@ def add_transaction(
         raise ValueError("side must be 'buy', 'sell', 'dividend', or 'tax'")
 
     # ensure asset row (and external_id column) first
-    ensure_import_schema()
+    init_db()
     upsert_asset_if_missing(ticker, currency=price_ccy)
 
     conn = get_connection()
@@ -186,7 +186,7 @@ def _usd_notional_for_row(row: pd.Series) -> float:
 
 def _dime_statements() -> list[dict]:
     """Imported Dime monthly statements, oldest first, holdings keyed by ticker."""
-    ensure_import_schema()
+    init_db()
     conn = get_connection()
     rows = conn.execute(
         "SELECT detail FROM imported_files WHERE kind = 'monthly_statement' AND status = 'ok'"

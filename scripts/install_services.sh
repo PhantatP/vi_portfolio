@@ -4,6 +4,7 @@
 #   vi-portfolio-api        FastAPI backend on :8000
 #   vi-portfolio-ui         Vite frontend on :5173
 #   vi-portfolio-dime-sync  Dime Gmail import, run daily by vi-portfolio-dime-sync.timer
+#   vi-portfolio-prices     store daily prices, run hourly by vi-portfolio-prices.timer
 #
 # usage: bash scripts/install_services.sh [--sync-time HH:MM] [--uninstall]
 #   --sync-time  daily sync time in the system timezone (default 09:00)
@@ -20,8 +21,8 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-UNITS="vi-portfolio-api.service vi-portfolio-ui.service vi-portfolio-dime-sync.service vi-portfolio-dime-sync.timer"
-STARTED="vi-portfolio-api.service vi-portfolio-ui.service vi-portfolio-dime-sync.timer"
+UNITS="vi-portfolio-api.service vi-portfolio-ui.service vi-portfolio-dime-sync.service vi-portfolio-dime-sync.timer vi-portfolio-prices.service vi-portfolio-prices.timer"
+STARTED="vi-portfolio-api.service vi-portfolio-ui.service vi-portfolio-dime-sync.timer vi-portfolio-prices.timer"
 UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
 
 if [ "$UNINSTALL" = 1 ]; then
@@ -125,9 +126,31 @@ Persistent=true
 [Install]
 WantedBy=timers.target"
 
+write_unit vi-portfolio-prices.service "[Unit]
+Description=VI Portfolio: store daily prices from Yahoo Finance
+After=network-online.target time-sync.target
+Wants=network-online.target time-sync.target
+
+[Service]
+Type=oneshot
+$COMMON
+WorkingDirectory=$APP_DIR
+ExecStart=$PYTHON app/cli.py prices-refresh"
+
+write_unit vi-portfolio-prices.timer "[Unit]
+Description=Hourly price refresh for VI Portfolio
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target"
+
 sudo systemctl daemon-reload
 sudo systemctl enable $STARTED
 sudo systemctl restart $STARTED   # pick up changed units / code on re-install
+sudo systemctl start --no-block vi-portfolio-prices.service   # backfill now instead of at the next hour
 
 sleep 5
 for u in vi-portfolio-api.service vi-portfolio-ui.service; do
@@ -146,3 +169,4 @@ echo "  systemctl status vi-portfolio-api vi-portfolio-ui"
 echo "  systemctl list-timers vi-portfolio-dime-sync.timer     # next sync time"
 echo "  sudo systemctl start vi-portfolio-dime-sync            # sync now"
 echo "  journalctl -u vi-portfolio-dime-sync -n 100            # last sync result"
+echo "  journalctl -u vi-portfolio-prices -n 50                # last price refresh"

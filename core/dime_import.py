@@ -18,7 +18,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .db import get_connection, PROJECT_ROOT
-from .db_init import ensure_import_schema
+from .db_init import init_db
 from .dime_pdf import read_pdf_text, parse_confirmation_note, parse_monthly_statement, DimeParseError
 from .transactions import add_transaction, rebuild_holdings_from_transactions
 
@@ -40,7 +40,7 @@ def file_kind(filename: str) -> str | None:
 
 
 def imported_ok_files() -> set[str]:
-    ensure_import_schema()
+    init_db()
     conn = get_connection()
     rows = conn.execute("SELECT file_key FROM imported_files WHERE status = 'ok'").fetchall()
     conn.close()
@@ -165,7 +165,7 @@ def reconcile(statement: dict) -> dict:
 
 
 def latest_statement() -> dict | None:
-    ensure_import_schema()
+    init_db()
     conn = get_connection()
     rows = conn.execute(
         "SELECT detail FROM imported_files WHERE kind = 'monthly_statement' AND status = 'ok'"
@@ -180,7 +180,7 @@ def import_files(files: list[tuple[str, bytes]], dry_run: bool = False) -> dict:
     files: (filename, pdf bytes). Notes are imported before statements so the
     reconciliation sees the newest trades.
     """
-    ensure_import_schema()
+    init_db()
     password = os.getenv("VI_DIME_PDF_PASSWORD")
     if not password:
         raise RuntimeError("Set VI_DIME_PDF_PASSWORD in .env (the password Dime uses for its PDFs)")
