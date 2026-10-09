@@ -25,6 +25,33 @@ python app/cli.py portfolio
 streamlit run app/web_app.py
 ```
 
+## Dime import (no screenshots)
+
+Imports Dime! offshore (US stock) confirmation notes and monthly statements from Gmail.
+
+One-time setup:
+
+1. Put the Dime PDF password in `.env`: `VI_DIME_PDF_PASSWORD=...`
+2. In Google Cloud console: create a project, enable the Gmail API, set the OAuth consent
+   screen to **In production** (otherwise the token expires every 7 days), create an OAuth
+   client of type **Desktop app** and save it as `secrets/gmail_credentials.json`.
+3. On a machine with a browser: `python app/cli.py dime-auth` (writes `secrets/gmail_token.json`).
+   Copy `secrets/` and `.env` to the Jetson.
+
+Use:
+
+```bash
+python app/cli.py dime-sync --dry-run    # show what would be imported/corrected
+python app/cli.py dime-sync              # import new PDFs from Gmail
+python app/cli.py dime-sync file1.pdf    # or import local PDFs
+python app/cli.py dime-reconcile         # DB share counts vs the latest Dime statement
+```
+
+API: `POST /api/import/dime/sync?dry_run=true`, `GET /api/import/dime/reconcile`.
+Re-running is safe: orders are de-duplicated by Dime's order id, and rows typed in earlier
+from screenshots are matched and corrected instead of duplicated. Dividends are not in these
+PDFs, so they still need to be entered separately.
+
 ## Backup
 
 Edit and run `scripts/backup_db.sh`, then set a cron job to copy the DB file to OneDrive regularly.

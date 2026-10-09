@@ -1,5 +1,6 @@
 # core/transactions.py
 from .db import get_connection
+from .db_init import ensure_import_schema
 from .fx import fetch_usd_thb_rate
 from .symbols import detect_asset_profile
 import pandas as pd
@@ -51,7 +52,8 @@ def add_transaction(
     fee_ccy: str | None = None,      # "USD" / "THB"; if None -> same as price_ccy
     thb_amount: float | None = None, # actual THB charged by broker/app
     usd_amount: float | None = None, # total USD notionals (qty*price); optional
-    fx_thb_per_usd: float | None = None  # explicit FX override
+    fx_thb_per_usd: float | None = None,  # explicit FX override
+    external_id: str | None = None   # broker's order id, unique per broker (dedup for imports)
 ) -> None:
     """
     Record a transaction linked to an (auto-upserted) asset.
@@ -61,7 +63,8 @@ def add_transaction(
     if side not in ("buy", "sell", "dividend", "tax"):
         raise ValueError("side must be 'buy', 'sell', 'dividend', or 'tax'")
 
-    # ensure asset row first
+    # ensure asset row (and external_id column) first
+    ensure_import_schema()
     upsert_asset_if_missing(ticker, currency=price_ccy)
 
     conn = get_connection()
@@ -88,15 +91,15 @@ def add_transaction(
         """
         INSERT INTO transactions
           (asset_id, broker, trade_date, side, quantity, price, fee, currency,
-           price_ccy, thb_amount, usd_amount, fx_thb_per_usd, fee_ccy)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           price_ccy, thb_amount, usd_amount, fx_thb_per_usd, fee_ccy, external_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             asset_id, broker, trade_date, side, float(quantity),
             float(price_per_share) if price_per_share is not None else None,
             float(fee) if fee is not None else 0.0,
             price_ccy,  # legacy mirror
-            price_ccy, thb_amount, usd_amount, fx_thb_per_usd, fee_ccy
+            price_ccy, thb_amount, usd_amount, fx_thb_per_usd, fee_ccy, external_id
         )
     )
     conn.commit()
@@ -226,7 +229,7 @@ def rebuild_holdings_from_transactions() -> pd.DataFrame:
     
     for _, row in pos.iterrows():
         # Insert directly using asset_id since we already have it
-        if row["quantity"] > 0:
+        if row["quantity"] > 1e-6:  # ignore rounding dust left by 7-decimal fractional shares
             cur.execute(
                 "INSERT INTO holdings (asset_id, broker, quantity, avg_price, currency) VALUES (?, ?, ?, ?, 'THB')",
                 (row["asset_id"], row["broker"], float(row["quantity"]), float(row["avg_cost_thb_per_unit"]))

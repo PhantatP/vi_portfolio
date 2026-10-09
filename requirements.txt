@@ -9,3 +9,8 @@ fastapi
 uvicorn
 pydantic
 python-multipart
+pypdf
+cryptography
+python-dotenv
+google-api-python-client
+google-auth-oauthlib

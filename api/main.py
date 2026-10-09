@@ -253,6 +253,26 @@ def get_assets():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/import/dime/sync")
+def dime_sync(dry_run: bool = False):
+    """Fetch new Dime PDFs from Gmail and import them. dry_run=true reports without writing."""
+    from core.dime_import import sync_from_gmail
+    try:
+        return sync_from_gmail(dry_run=dry_run)
+    except RuntimeError as e:  # missing password / Gmail token
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/import/dime/reconcile")
+def dime_reconcile():
+    """Compare DB share counts with the latest imported Dime monthly statement."""
+    from core.dime_import import latest_statement, reconcile
+    statement = latest_statement()
+    if statement is None:
+        raise HTTPException(status_code=404, detail="No Dime monthly statement imported yet")
+    return reconcile(statement)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
