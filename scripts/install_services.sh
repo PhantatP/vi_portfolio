@@ -63,7 +63,6 @@ fi
 # systemd starts with a minimal PATH; include node's directory (e.g. nvm installs)
 SERVICE_PATH="$(dirname "$NPX"):/usr/local/bin:/usr/bin:/bin"
 COMMON="User=$RUN_USER
-Environment=VI_DB_PATH=$APP_DIR/db/vi_portfolio.db
 Environment=PATH=$SERVICE_PATH
 Environment=PYTHONUNBUFFERED=1"
 

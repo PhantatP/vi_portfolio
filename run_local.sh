@@ -1,6 +1,5 @@
 #!/bin/bash
 cd "$(dirname "$0")"
-export VI_DB_PATH="$(pwd)/db/vi_portfolio.db"
 
 echo "Starting VI Portfolio (Modern Refactor)"
 echo
