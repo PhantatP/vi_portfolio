@@ -50,11 +50,11 @@ ticker is re-fetched in full and every stored row stays on one basis. If that re
 is stored for the ticker and it's retried next run. Total return can be computed later from
 `corporate_actions`.
 
-**Known memory costs in the API process (pre-existing, not yet addressed).**
-`research.py`'s `ttl_cache` never evicts expired entries: one entry per distinct ticker/period
-researched, including price-history frames. It grows without bound and should be replaced by the
-DB-backed cache in phases 2–3. The easyocr reader (with torch) stays loaded for the life of the
-process after the first OCR scan.
+**Memory in the API process.** `research.py`'s `ttl_cache` used to keep every entry forever (one
+per ticker ever researched, including price-history frames). It now drops expired entries and holds
+at most 256 per function, so the worst case is a few MB. It is still per-process and lost on restart;
+the persistent DB-backed cache comes with phases 2–3. Still open: the easyocr reader (with torch)
+stays loaded for the life of the process after the first OCR scan.
 
 **Known gap.** Yahoo serves no history for Thai indices (`^SET.BK` returns only today, and `^SET50.BK`
 only allows 1d/5d). Their history builds up from the first refresh onward. `TDEX.BK` (SET50 ETF,

@@ -1,20 +1,32 @@
 import functools
+import threading
 import time
+from collections import OrderedDict
 
 import yfinance as yf
 import pandas as pd
 
-def ttl_cache(ttl: int):
-    """Cache results per argument tuple for `ttl` seconds (in-process)."""
+def ttl_cache(ttl: int, maxsize: int = 256):
+    """
+    Cache results per argument tuple for `ttl` seconds (in-process), keeping at most `maxsize` entries.
+    Expired entries are dropped, so the cache can't grow with every ticker ever looked up.
+    """
     def decorator(fn):
-        cache = {}
+        cache = OrderedDict()  # args -> (stored_at, result), oldest first
+        lock = threading.Lock()  # FastAPI runs sync endpoints on a thread pool
         @functools.wraps(fn)
         def wrapper(*args):
-            hit = cache.get(args)
+            with lock:
+                hit = cache.get(args)
             if hit and time.monotonic() - hit[0] < ttl:
                 return hit[1]
             result = fn(*args)
-            cache[args] = (time.monotonic(), result)
+            now = time.monotonic()
+            with lock:
+                cache[args] = (now, result)
+                cache.move_to_end(args)
+                while len(cache) > maxsize or now - next(iter(cache.values()))[0] >= ttl:
+                    cache.popitem(last=False)
             return result
         return wrapper
     return decorator
