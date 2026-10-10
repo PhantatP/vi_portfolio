@@ -44,16 +44,17 @@ def _fetch_live_price(t):
         pass
     return None
 
-def fetch_latest_prices(tickers):
+def fetch_latest_prices(tickers, live=True):
     """
-    Latest stored close (core/prices.py); live yfinance only for tickers with no stored prices.
+    Latest stored close (core/prices.py); live yfinance only for tickers with no stored prices,
+    and only when live=True.
     Always returns DataFrame with ['ticker','price','as_of'].
     """
     tickers = [t.upper() for t in tickers if t]
     stored = latest_prices(tickers)
     rows = stored.to_dict("records")
 
-    for t in sorted(set(tickers) - set(stored["ticker"])):
+    for t in sorted(set(tickers) - set(stored["ticker"])) if live else []:
         price = _fetch_live_price(t)
         if price is not None:
             rows.append({"ticker": t, "price": price, "as_of": date.today().isoformat()})
@@ -108,18 +109,19 @@ def get_holdings_df():
     return df
 
 
-def build_portfolio_view_thb():
+def build_portfolio_view_thb(live=True):
+    """live=False: stored prices and FX only, never yfinance (used by the agent views)."""
     hold = get_holdings_df()
     if hold.empty:
         return hold, 0.0
     hold["ticker"] = hold["ticker"].astype(str).str.upper()
-    prices = fetch_latest_prices(hold["ticker"].unique().tolist())
+    prices = fetch_latest_prices(hold["ticker"].unique().tolist(), live=live)
     if "ticker" not in prices.columns:
         prices = pd.DataFrame({"ticker": hold["ticker"].unique(), "price": pd.NA})
     df = hold.merge(prices, on="ticker", how="left")
 
 
-    usd_thb = fetch_usd_thb_rate()
+    usd_thb = fetch_usd_thb_rate(live=live)
     df["usd_thb"] = usd_thb
 
     # Decide asset currency (fallback if NULL)

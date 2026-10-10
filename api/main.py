@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
+from contextlib import asynccontextmanager
 from datetime import date as dt_date
 import math
 import pandas as pd
@@ -15,6 +16,7 @@ from core.portfolio import build_portfolio_view_thb, get_holdings_df
 from core.analysis import get_rebalancing_needs, get_hierarchical_distribution, get_smart_picks, get_all_sector_peers
 from core.research import get_basic_info, get_price_history, get_income_funnel
 from core.transactions import add_transaction, rebuild_holdings_from_transactions, upsert_asset_if_missing
+from api.mcp_server import mcp, mcp_app
 
 def _clean(obj):
     """Recursively replace NaN/inf with None so JSON serialization never fails."""
@@ -29,7 +31,12 @@ def _clean(obj):
 def _df_records(df: pd.DataFrame):
     return _clean(df.to_dict(orient="records"))
 
-app = FastAPI(title="VI Portfolio API")
+@asynccontextmanager
+async def lifespan(_app):
+    async with mcp.session_manager.run():  # a mounted app's own lifespan doesn't run, so start MCP here
+        yield
+
+app = FastAPI(title="VI Portfolio API", lifespan=lifespan)
 
 # Enable CORS for frontend development
 app.add_middleware(
@@ -205,6 +212,10 @@ def dime_reconcile():
     if statement is None:
         raise HTTPException(status_code=404, detail="No Dime monthly statement imported yet")
     return reconcile(statement)
+
+# MCP for AI agents at /mcp: add its single route rather than mounting the app at "/", which would
+# swallow FastAPI's trailing-slash redirects and 405s for every other path.
+app.router.routes.extend(mcp_app.routes)
 
 if __name__ == "__main__":
     import uvicorn

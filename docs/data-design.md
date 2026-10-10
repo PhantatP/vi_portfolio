@@ -87,16 +87,61 @@ history since 2008) can serve as a backfillable proxy if needed.
   non-zero unless `ok`, so systemd shows the failure.
 - First real run: 4 equities gave 6,053 rows (~1,500 per stock, ~150 bytes per row) in ~15–20 s.
 
-### 3. Ticker briefs
+### 3. Ticker briefs (done)
 
-`ticker_brief(ticker, brief_json, computed_at, data_as_of)`: a compact (~300–500 token) summary of
-valuation, quality, trend and position, rebuilt after each refresh. Agents read this first.
+`core/briefs.py` builds compact views from SQLite only (never Yahoo): ticker brief, portfolio summary,
+watchlist, price history, financials table, data status.
 
-### 4. MCP server
+- **Computed on demand, not stored.** The original plan was a `ticker_brief` table rebuilt after each
+  refresh. Computing a brief takes ~100–300 ms, and the token savings come from the brief being compact,
+  not from storing it. A stored copy would need a rebuild job and could go stale, for example after a
+  transaction changes the position.
+- **Brief contents (~250 tokens for a stock, ~90 for an ETF):** profile; last price, returns
+  (1m/3m/1y/3y/5y, each from the last close on or before that window's start), 52-week range, TTM
+  dividend yield; fundamentals on a TTM basis (four consecutive quarters, else the latest fiscal year):
+  size, growth, margins, ROE, debt/equity, valuation; the user's position; the user's notes. Missing
+  values are omitted.
+- **Normalized earnings.** P/E, net margin and ROE use Yahoo's `NormalizedIncome` (excludes unusual
+  items) when available. Example: GOOGL booked a $98.8B gain on securities in Q2 2026, so reported
+  P/E was 17.6 against 34.7 normalized. `pe_reported` is included when the two differ by more than 10%.
+- **Never calls Yahoo**, even when stored data is stale. The views use `build_portfolio_view_thb(live=False)`:
+  a stale stored FX rate is used as-is (the rate used is reported), and a held ticker with no stored
+  price is flagged `price_missing` and left out of P/L, instead of being fetched live or shown as a
+  -100% loss.
+- **Balance-sheet items** (equity, debt, cash, share count) come from the most recent period that has
+  them, quarterly first and then annual, because Thai quarterly balance sheets are often sparse.
+- **Growth** is fiscal year vs fiscal year, labelled with its own `basis`, and is skipped when the
+  previous value is zero or negative.
+- **Valuation is skipped** when the trading and reporting currencies differ (TM: USD vs JPY), because
+  only USD/THB is stored. Ratios within the statements (margins, ROE, growth) are still given.
+- **Known gaps:**
+  - A same-currency ADR whose ratio isn't 1:1 would get a wrong market cap.
+  - Not verified: whether `OrdinarySharesNumber` is class-A-equivalent for dual-class stocks such as
+    BRK-B. If it is, their market cap and P/E would be off.
+  - `portfolio.py` (older code) treats any holding currency other than USD/THB as THB.
+- **Portfolio allocation** compares current weights with `config/config.json` targets (country
+  US/TH/OTHER, style growth/dividend, BTC cap). Country comes from `assets.country`, then
+  `profiles.country`, then a `.BK` suffix means TH; style comes from `assets.tags`. Unknown or untagged
+  holdings are reported as `UNKNOWN` / `untagged` rather than guessed.
 
-Mounted inside the FastAPI app at `/mcp` (one service, one port, one cache). Read-only tools: briefs,
-portfolio vs target, watchlist, price history queries (downsampled), notes. Laptop connects with
-`claude mcp add --transport http vi-portfolio http://<jetson>:8000/mcp`.
+### 4. MCP server (done)
+
+`api/mcp_server.py`, mounted in the FastAPI app (one service, one port): `http://<jetson>:8000/mcp`.
+Uses the MCP Python SDK 2.x (`MCPServer`, formerly `FastMCP`) with stateless streamable HTTP and JSON
+responses. Its single `/mcp` route is added to FastAPI's router. Mounting the MCP app at `/` would
+also work, but it would turn FastAPI's trailing-slash redirects and 405s into 404s. FastAPI's lifespan
+starts the MCP session manager, because the MCP app's own lifespan doesn't run inside FastAPI.
+
+- **Tools (all read-only):** `get_portfolio`, `get_ticker_brief`, `get_watchlist`, `get_price_history`
+  (daily/weekly/monthly, max 400 points), `get_financials` (default key metrics, or any Yahoo raw key),
+  `get_data_status`. Each returns compact JSON text, without structured output, so results aren't sent
+  twice.
+- **Token cost:** ~1,000 tokens per session for instructions + tool definitions, then ~60–380 per call.
+- **Connect from the laptop:** `claude mcp add --transport http vi-portfolio http://<jetson-ip>:8000/mcp`
+- **Security:** the SDK's localhost-only Host check is off (`host="0.0.0.0"`) so the laptop can reach
+  it. That matches the REST API on the same port, which is already open to the LAN with CORS `*`. Both
+  are fine on a home LAN or Tailscale. Before exposing the port anywhere else, add a token check in
+  front of both.
 
 ## Size estimate
 

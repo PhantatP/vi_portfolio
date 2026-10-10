@@ -6,7 +6,7 @@ from .prices import USD_THB, latest_prices
 
 MAX_STORED_AGE_DAYS = 7  # older means the refresh job stopped; prefer a live rate
 
-def fetch_usd_thb_rate(default: float = 36.0) -> float:
+def fetch_usd_thb_rate(default: float = 36.0, live: bool = True) -> float:
     """
     Return a reliable USD→THB rate.
     Uses:
@@ -15,7 +15,7 @@ def fetch_usd_thb_rate(default: float = 36.0) -> float:
       2) history Close price
       3) stale stored close
       4) fallback default
-    Never returns None.
+    live=False skips 1) and 2). Never returns None.
     """
 
     # 0) Stored by the price refresh job
@@ -23,6 +23,8 @@ def fetch_usd_thb_rate(default: float = 36.0) -> float:
     stored_rate = float(stored["price"].iloc[0]) if not stored.empty else None
     if stored_rate and date.fromisoformat(stored["as_of"].iloc[0]) >= date.today() - timedelta(days=MAX_STORED_AGE_DAYS):
         return stored_rate
+    if not live:
+        return stored_rate or default
 
     # 1) Try fast_info (most reliable)
     try:
