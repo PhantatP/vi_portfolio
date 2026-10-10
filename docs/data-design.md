@@ -60,11 +60,32 @@ removed, since the Dime Gmail import replaces it.
 only allows 1d/5d). Their history builds up from the first refresh onward. `TDEX.BK` (SET50 ETF,
 history since 2008) can serve as a backfillable proxy if needed.
 
-### 2. Financials
+### 2. Financials (done)
 
-`financials(ticker, period_type, period_end, metric, value, source, fetched_at)` in long format,
-because line items differ by industry (banks, REITs, tech). Refreshed weekly. Skips `index`/FX tickers.
-Profile fields (name, sector, summary) are refreshed weekly into `assets`.
+- `financials(ticker, statement, period_type, period_end, metric, value, source, fetched_at)` in long
+  format, because line items differ by industry (banks, REITs, tech). `statement` is income / balance /
+  cashflow, `period_type` is annual / quarterly, and `metric` is Yahoo's raw key (`TotalRevenue`, not
+  "Total Revenue"), since raw keys are stable identifiers.
+- **Yahoo only serves the last ~4 years and ~5 quarters**, so this table is the only way to build
+  longer history: periods that drop off upstream are kept, and so are metrics Yahoo stops reporting
+  for a period. Restated figures overwrite stored ones.
+- `profiles(ticker, quote_type, name, sector, industry, country, currency, financial_currency, summary,
+  source, fetched_at)` for every tracked ticker. This is a separate table, not columns in `assets`:
+  `assets` is the transaction ledger, watchlist tickers have no row there, and `/api/assets` would
+  start listing them. A degraded Yahoo response doesn't blank stored fields (upsert with `COALESCE`).
+- **Two currencies.** `currency` is the trading currency, which `price_daily` uses. `financial_currency`
+  is the reporting currency, which `financials` uses. They differ for ADRs and some foreign listings:
+  TM trades in USD but reports in JPY. Any ratio mixing price and statements (P/E, P/B, market cap)
+  must convert between them first.
+- `cli.py fundamentals-refresh` runs weekly from the `vi-portfolio-fundamentals` systemd timer
+  (Sunday 06:30, outside both markets' sessions). Statements are fetched only when `quote_type` is not
+  ETF / INDEX / CURRENCY / CRYPTOCURRENCY / MUTUALFUND. Tickers are processed one at a time with a 1 s
+  pause and their own commit, so one failure doesn't stop the rest. Each ticker's network calls finish
+  before its write starts, so the job never holds the DB write lock while waiting on Yahoo.
+- Status: `ok`, `partial` (some tickers errored), or `error` (nothing came back, or every equity
+  returned no statements, which is what a rate limit swallowed by yfinance looks like). The CLI exits
+  non-zero unless `ok`, so systemd shows the failure.
+- First real run: 4 equities gave 6,053 rows (~1,500 per stock, ~150 bytes per row) in ~15–20 s.
 
 ### 3. Ticker briefs
 
@@ -79,5 +100,8 @@ portfolio vs target, watchlist, price history queries (downsampled), notes. Lapt
 
 ## Size estimate
 
-About 100 tickers over 30 years: ~750k price rows (~50 MB) plus ~600k financial rows (~40 MB). The
-first real backfill (7 holdings, 3 indices, FX; full history) was 91k rows and 6.6 MB.
+- **Prices:** about 100 tickers over 30 years is ~750k rows (~50 MB). The first real backfill (7
+  holdings, 3 indices, FX; full history) was 91k rows and 6.6 MB.
+- **Financials:** each stock adds ~700 rows a year (annual plus 4 quarters), about 0.1 MB. So 30 stocks
+  over 30 years is ~100 MB, and 100 stocks is ~300 MB. Normalizing metric names into a lookup table
+  would roughly halve that if it ever matters.

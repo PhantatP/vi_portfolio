@@ -74,6 +74,13 @@ def prices_refresh(args):
     if summary["status"] != "ok":
         raise SystemExit(1)  # lets the systemd timer show a failed refresh
 
+def fundamentals_refresh(args):
+    from core.fundamentals import refresh_fundamentals
+    summary = refresh_fundamentals()
+    print(json.dumps(summary, indent=2))
+    if summary["status"] != "ok":
+        raise SystemExit(1)
+
 def watch_add(args):
     from core.prices import add_to_watchlist
     t = add_to_watchlist(args.ticker, args.reason)
@@ -131,6 +138,9 @@ def main():
 
     sp = sub.add_parser("prices-refresh", help="Store daily prices for held + watched tickers (backfills new ones)")
     sp.set_defaults(func=prices_refresh)
+
+    sp = sub.add_parser("fundamentals-refresh", help="Store financial statements and profiles for tracked tickers")
+    sp.set_defaults(func=fundamentals_refresh)
 
     sp = sub.add_parser("watch-add", help="Track a ticker's prices without holding it")
     sp.add_argument("ticker", help="Yahoo symbol, e.g. CPALL.BK or ^GSPC")

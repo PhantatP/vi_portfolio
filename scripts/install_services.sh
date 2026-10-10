@@ -5,6 +5,7 @@
 #   vi-portfolio-ui         Vite frontend on :5173
 #   vi-portfolio-dime-sync  Dime Gmail import, run daily by vi-portfolio-dime-sync.timer
 #   vi-portfolio-prices     store daily prices, run hourly by vi-portfolio-prices.timer
+#   vi-portfolio-fundamentals  store statements + profiles, run weekly by vi-portfolio-fundamentals.timer
 #
 # usage: bash scripts/install_services.sh [--sync-time HH:MM] [--uninstall]
 #   --sync-time  daily sync time in the system timezone (default 09:00)
@@ -21,8 +22,8 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-UNITS="vi-portfolio-api.service vi-portfolio-ui.service vi-portfolio-dime-sync.service vi-portfolio-dime-sync.timer vi-portfolio-prices.service vi-portfolio-prices.timer"
-STARTED="vi-portfolio-api.service vi-portfolio-ui.service vi-portfolio-dime-sync.timer vi-portfolio-prices.timer"
+UNITS="vi-portfolio-api.service vi-portfolio-ui.service vi-portfolio-dime-sync.service vi-portfolio-dime-sync.timer vi-portfolio-prices.service vi-portfolio-prices.timer vi-portfolio-fundamentals.service vi-portfolio-fundamentals.timer"
+STARTED="vi-portfolio-api.service vi-portfolio-ui.service vi-portfolio-dime-sync.timer vi-portfolio-prices.timer vi-portfolio-fundamentals.timer"
 UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
 
 if [ "$UNINSTALL" = 1 ]; then
@@ -147,10 +148,33 @@ Persistent=true
 [Install]
 WantedBy=timers.target"
 
+write_unit vi-portfolio-fundamentals.service "[Unit]
+Description=VI Portfolio: store financial statements and profiles from Yahoo Finance
+After=network-online.target time-sync.target
+Wants=network-online.target time-sync.target
+
+[Service]
+Type=oneshot
+$COMMON
+WorkingDirectory=$APP_DIR
+ExecStart=$PYTHON app/cli.py fundamentals-refresh"
+
+# weekly: statements only change quarterly; Sunday morning avoids both markets' sessions
+write_unit vi-portfolio-fundamentals.timer "[Unit]
+Description=Weekly fundamentals refresh for VI Portfolio
+
+[Timer]
+OnCalendar=Sun *-*-* 06:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target"
+
 sudo systemctl daemon-reload
 sudo systemctl enable $STARTED
 sudo systemctl restart $STARTED   # pick up changed units / code on re-install
 sudo systemctl start --no-block vi-portfolio-prices.service   # backfill now instead of at the next hour
+sudo systemctl start --no-block vi-portfolio-fundamentals.service
 
 sleep 5
 for u in vi-portfolio-api.service vi-portfolio-ui.service; do
@@ -170,3 +194,4 @@ echo "  systemctl list-timers vi-portfolio-dime-sync.timer     # next sync time"
 echo "  sudo systemctl start vi-portfolio-dime-sync            # sync now"
 echo "  journalctl -u vi-portfolio-dime-sync -n 100            # last sync result"
 echo "  journalctl -u vi-portfolio-prices -n 50                # last price refresh"
+echo "  journalctl -u vi-portfolio-fundamentals -n 50          # last fundamentals refresh"

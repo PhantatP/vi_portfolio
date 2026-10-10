@@ -125,9 +125,43 @@ def _m2_market_data(cur):
     cur.executemany("INSERT OR IGNORE INTO watchlist (ticker, reason) VALUES (?, 'benchmark');",
                     [(t,) for t in BENCHMARKS])
 
+FUNDAMENTALS_SQL = """
+-- Yahoo only serves the last ~4 years / ~5 quarters, so rows are kept after they drop off upstream.
+CREATE TABLE IF NOT EXISTS financials (
+    ticker TEXT NOT NULL,
+    statement TEXT NOT NULL,        -- income / balance / cashflow
+    period_type TEXT NOT NULL,      -- annual / quarterly
+    period_end TEXT NOT NULL,       -- YYYY-MM-DD
+    metric TEXT NOT NULL,           -- Yahoo's raw key, e.g. TotalRevenue, StockholdersEquity
+    value REAL NOT NULL,
+    source TEXT NOT NULL,
+    fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (ticker, statement, period_type, period_end, metric)
+) WITHOUT ROWID;
+
+-- Latest descriptive data per tracked ticker. Separate from assets, which is the transaction ledger.
+CREATE TABLE IF NOT EXISTS profiles (
+    ticker TEXT PRIMARY KEY,
+    quote_type TEXT,                -- EQUITY / ETF / INDEX / CURRENCY / ...
+    name TEXT,
+    sector TEXT,
+    industry TEXT,
+    country TEXT,
+    currency TEXT,                  -- trading currency: price_daily is in this
+    financial_currency TEXT,        -- reporting currency: financials are in this (TM: JPY, trades in USD)
+    summary TEXT,
+    source TEXT NOT NULL,
+    fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+def _m3_fundamentals(cur):
+    """Stored financial statements and profiles (core/fundamentals.py)."""
+    cur.executescript(FUNDAMENTALS_SQL)
+
 # Append-only: never edit or reorder a step that has shipped. PRAGMA user_version = steps applied.
 # Steps must be idempotent, since a crash between a step and its version bump re-runs it.
-MIGRATIONS = [_m1_baseline, _m2_market_data]
+MIGRATIONS = [_m1_baseline, _m2_market_data, _m3_fundamentals]
 
 _schema_ready = False
 
