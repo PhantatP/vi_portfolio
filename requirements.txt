@@ -1,12 +1,9 @@
 pandas
 yfinance
-easyocr
 numpy
-torch
 fastapi
 uvicorn
 pydantic
-python-multipart
 pypdf
 cryptography
 python-dotenv

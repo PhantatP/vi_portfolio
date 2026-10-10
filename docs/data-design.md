@@ -53,8 +53,8 @@ is stored for the ticker and it's retried next run. Total return can be computed
 **Memory in the API process.** `research.py`'s `ttl_cache` used to keep every entry forever (one
 per ticker ever researched, including price-history frames). It now drops expired entries and holds
 at most 256 per function, so the worst case is a few MB. It is still per-process and lost on restart;
-the persistent DB-backed cache comes with phases 2–3. Still open: the easyocr reader (with torch)
-stays loaded for the life of the process after the first OCR scan.
+the persistent DB-backed cache comes with phases 2–3. OCR receipt scanning (easyocr + torch) was
+removed, since the Dime Gmail import replaces it.
 
 **Known gap.** Yahoo serves no history for Thai indices (`^SET.BK` returns only today, and `^SET50.BK`
 only allows 1d/5d). Their history builds up from the first refresh onward. `TDEX.BK` (SET50 ETF,

@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException, File, UploadFile, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 from datetime import date as dt_date
 import math
 import pandas as pd
@@ -154,73 +154,6 @@ def post_transaction(tx: TransactionIn):
         return {"status": "ok", "ticker": ticker}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/ocr/parse")
-async def ocr_parse(request: Request, file: UploadFile = File(...)):
-    try:
-        from core.ocr_parser import parse_dime_image
-        image_bytes = await file.read()
-        if await request.is_disconnected():
-            return {"transactions": []}
-        parsed = parse_dime_image(image_bytes)
-        return {"transactions": parsed}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-class BulkTransactionIn(BaseModel):
-    transactions: List[TransactionIn]
-
-@app.post("/api/ocr/import")
-def ocr_import(body: BulkTransactionIn):
-    try:
-        count = 0
-        for tx in body.transactions:
-            ticker = tx.ticker.strip().upper()
-            if not ticker:
-                continue
-            upsert_asset_if_missing(ticker)
-            add_transaction(
-                ticker=ticker,
-                broker=tx.broker,
-                trade_date=tx.trade_date or str(dt_date.today()),
-                side=tx.side,
-                quantity=tx.quantity,
-                price_per_share=tx.price_per_share,
-                price_ccy=tx.price_ccy,
-                fee=tx.fee,
-                fee_ccy=tx.fee_ccy,
-                thb_amount=tx.thb_amount,
-                usd_amount=tx.usd_amount,
-                fx_thb_per_usd=tx.fx_thb_per_usd,
-            )
-            count += 1
-        rebuild_holdings_from_transactions()
-        return {"status": "ok", "imported": count}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-class TxCheckItem(BaseModel):
-    ticker: str
-    side: str
-    trade_date: str
-
-@app.post("/api/transactions/exists")
-def transactions_exist(items: List[TxCheckItem]):
-    from core.db import get_connection
-    conn = get_connection()
-    cur = conn.cursor()
-    existing = []
-    for item in items:
-        cur.execute(
-            """SELECT 1 FROM transactions t
-               JOIN assets a ON a.id = t.asset_id
-               WHERE a.ticker = ? AND t.side = ? AND t.trade_date = ? LIMIT 1""",
-            (item.ticker.strip().upper(), item.side.strip().lower(), item.trade_date)
-        )
-        if cur.fetchone():
-            existing.append(f"{item.ticker.upper()}|{item.side.lower()}|{item.trade_date}")
-    conn.close()
-    return {"existing": existing}
 
 @app.get("/api/debug/transactions")
 def debug_transactions():
