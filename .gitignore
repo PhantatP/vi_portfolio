@@ -20,7 +20,8 @@ samples/
 .venv.broken
 .claude/
 CLAUDE.md
-config/
+config/*
+!config/config.example.json
 graphify-out/
 secrets/
 .venv-py310

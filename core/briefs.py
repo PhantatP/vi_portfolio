@@ -27,6 +27,14 @@ MAX_POINTS = 400
 STALE_DAYS = 5
 
 
+def _load_targets() -> dict:
+    """target_allocations from config/config.json, or {} if the file is missing (it is gitignored)."""
+    try:
+        return json.loads(CONFIG_PATH.read_text()).get("target_allocations", {})
+    except FileNotFoundError:
+        return {}
+
+
 def _num(x, nd=2):
     if x is None or isinstance(x, str):
         return None
@@ -290,7 +298,7 @@ def portfolio_summary() -> dict:
     positions, total, usd_thb_used = _positions()
     if positions.empty:
         return {"positions": []}
-    targets = json.loads(CONFIG_PATH.read_text())["target_allocations"]
+    targets = _load_targets()
     conn = get_connection()
     try:
         prof = {t: _profile(conn, t) or {} for t in positions.index}
@@ -314,6 +322,7 @@ def portfolio_summary() -> dict:
         "total_value_thb": _num(total, 0), "total_cost_thb": _num(cost, 0),
         "unrealized_pl_thb": _num(total - priced_cost, 0), "unrealized_pl_pct": _pct(total - priced_cost, priced_cost),
         "positions_missing_price": sorted(rows.index[rows.value_thb.isna()]),
+        "note": None if targets else "No allocation targets: config/config.json is missing.",
         "usd_thb": {"rate": _price(usd_thb_used), "as_of": None if usd_thb.empty else usd_thb.as_of.iloc[0]},
         "oldest_price_as_of": rows.price_as_of.dropna().min() if rows.price_as_of.notna().any() else None,
         "positions": [
@@ -323,11 +332,11 @@ def portfolio_summary() -> dict:
             for t, r in rows.sort_values("value_thb", ascending=False).iterrows()],
         "allocation_pct": {
             "country": split("country_bucket"),
-            "country_target": {k: _num(v * 100, 1) for k, v in targets["country"].items()},
+            "country_target": {k: _num(v * 100, 1) for k, v in targets.get("country", {}).items()},
             "style": split("style"),
-            "style_target": {k: _num(v * 100, 1) for k, v in targets["tag"].items()},
+            "style_target": {k: _num(v * 100, 1) for k, v in targets.get("tag", {}).items()},
             "btc": _pct(rows[[t.startswith("BTC") for t in rows.index]].value_thb.sum(), total),
-            "btc_max": _num(targets["btc_max"] * 100, 1),
+            "btc_max": _num(targets["btc_max"] * 100, 1) if "btc_max" in targets else None,
             "sector": split("sector_name"),
         },
     })

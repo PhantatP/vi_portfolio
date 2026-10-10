@@ -15,6 +15,10 @@ def db(tmp_path, monkeypatch):
     monkeypatch.setattr(core.db, "DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr(core.db_init, "_schema_ready", False)
     monkeypatch.setattr(core.portfolio, "_fetch_live_price", lambda t: pytest.fail(f"live fetch for {t}"))
+    cfg = tmp_path / "config.json"
+    cfg.write_text('{"target_allocations": {"country": {"US": 0.4, "TH": 0.3, "OTHER": 0.3},'
+                   ' "tag": {"growth": 0.7, "dividend": 0.3}, "btc_max": 0.1}}')
+    monkeypatch.setattr(core.briefs, "CONFIG_PATH", cfg)
     core.db_init.init_db()
     con = sqlite3.connect(core.db.DB_PATH)
     yield con
@@ -170,6 +174,20 @@ def test_portfolio_allocation_against_targets(db):
     assert a["country"] == {"US": 65.8, "UNKNOWN": 32.9, "TH": 1.3}
     assert a["style"] == {"growth": 65.8, "untagged": 32.9, "dividend": 1.3}
     assert a["country_target"] == {"US": 40.0, "TH": 30.0, "OTHER": 30.0}
+
+
+def test_portfolio_summary_without_config(db, monkeypatch, tmp_path):
+    monkeypatch.setattr(core.briefs, "CONFIG_PATH", tmp_path / "missing.json")
+    _prices(db, "USDTHB=X", [(_days_ago(1), 30.0)])
+    _prices(db, "VOO", [(_days_ago(1), 500.0)])
+    _hold(db, "VOO", 1, 1.0)
+    db.commit()
+
+    p = core.briefs.portfolio_summary()
+    a = p["allocation_pct"]
+
+    assert "country_target" not in a and "btc_max" not in a
+    assert a["country"] and p["note"]
 
 
 def test_price_history_takes_last_close_of_each_month(db):
