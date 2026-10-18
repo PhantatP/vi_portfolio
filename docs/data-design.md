@@ -9,7 +9,10 @@ many tokens, so data is fetched on a schedule, stored in SQLite, and served from
 - **SQLite stays.** One machine, one writer (the refresh jobs), a few readers. Expected size is under
   ~150 MB after decades of daily data. WAL mode keeps readers from blocking the writer. Keep the live DB
   on local disk, not in a synced folder (OneDrive etc.), because sync tools can corrupt WAL files.
-- **Agents are read-only.** The MCP server gets no write tools.
+- **Agents are read-only, except for the watchlist.** The only MCP write tool is `add_to_watchlist`
+  (additive). It checks the symbol with one live Yahoo call and rejects it if there are no prices, so
+  typos never get tracked; a valid ticker's price history is stored at once. `cli.py watch-add` does
+  the same. Removing a ticker stays a CLI job.
 - **Facts vs derived.** Prices, financial statements and corporate actions are facts: upserted, never
   thrown away. Ratios, valuations and briefs are derived: recomputable, stored with `computed_at`.
 - **Every fact row records `source`** so another provider can be added if yfinance breaks.
@@ -132,9 +135,9 @@ responses. Its single `/mcp` route is added to FastAPI's router. Mounting the MC
 also work, but it would turn FastAPI's trailing-slash redirects and 405s into 404s. FastAPI's lifespan
 starts the MCP session manager, because the MCP app's own lifespan doesn't run inside FastAPI.
 
-- **Tools (all read-only):** `get_portfolio`, `get_ticker_brief`, `get_watchlist`, `get_price_history`
+- **Tools:** read-only `get_portfolio`, `get_ticker_brief`, `get_watchlist`, `get_price_history`
   (daily/weekly/monthly, max 400 points), `get_financials` (default key metrics, or any Yahoo raw key),
-  `get_data_status`. Each returns compact JSON text, without structured output, so results aren't sent
+  `get_data_status`; plus `add_to_watchlist`, the one write tool. Each returns compact JSON text, without structured output, so results aren't sent
   twice.
 - **Token cost:** ~1,000 tokens per session for instructions + tool definitions, then ~60–380 per call.
 - **Connect from the laptop:** `claude mcp add --transport http vi-portfolio http://<jetson-ip>:8000/mcp`

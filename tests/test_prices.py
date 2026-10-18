@@ -258,3 +258,18 @@ def test_watchlist_add_and_remove(yahoo):
     assert watched["CPALL.BK"] == "cheap retailer"
     assert core.prices.remove_from_watchlist("CPALL.BK")
     assert not core.prices.remove_from_watchlist("CPALL.BK")
+
+
+def test_checked_add_rejects_unknown_symbols_and_backfills_known_ones(yahoo):
+    yahoo.data["CPALL.BK"] = _frame([("2026-10-01", 40.0), ("2026-10-02", 41.0)])
+    with pytest.raises(ValueError, match="Yahoo has no prices for CPAL.BK"):
+        core.prices.add_checked_to_watchlist("cpal.bk")
+    assert "CPAL.BK" not in {w["ticker"] for w in core.prices.list_watchlist()}
+
+    assert core.prices.add_checked_to_watchlist(" cpall.bk ", "cheap retailer") == "CPALL.BK"
+    assert _closes("CPALL.BK") == [("2026-10-01", 40.0), ("2026-10-02", 41.0)]  # no wait for the refresh
+
+    calls = len(yahoo.calls)
+    core.prices.add_checked_to_watchlist("CPALL.BK", "new reason")  # already stored: no Yahoo call
+    assert len(yahoo.calls) == calls
+    assert {w["ticker"]: w["reason"] for w in core.prices.list_watchlist()}["CPALL.BK"] == "new reason"

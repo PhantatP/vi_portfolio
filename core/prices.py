@@ -160,6 +160,27 @@ def add_to_watchlist(ticker: str, reason: str | None = None) -> str:
     return t
 
 
+def add_checked_to_watchlist(ticker: str, reason: str | None = None) -> str:
+    """
+    add_to_watchlist, but only for a symbol Yahoo has prices for, so typos never get tracked. A new
+    ticker's full history is stored right away instead of waiting for the next refresh.
+    """
+    init_db()
+    t = ticker.strip().upper()
+    conn = get_connection()
+    try:
+        if not conn.execute("SELECT 1 FROM price_daily WHERE ticker = ? LIMIT 1", (t,)).fetchone():
+            f = _download([t], period="max").get(t)
+            if f is None:
+                raise ValueError(f"Yahoo has no prices for {t}. Check the symbol (Thai stocks end in .BK); "
+                                 f"if it is right, Yahoo may be down, so try again later.")
+            _store(conn, t, f)
+            conn.commit()
+    finally:
+        conn.close()
+    return add_to_watchlist(t, reason)
+
+
 def remove_from_watchlist(ticker: str) -> bool:
     """Stops refreshing the ticker unless it's held; stored history is kept."""
     init_db()

@@ -82,9 +82,12 @@ def fundamentals_refresh(args):
         raise SystemExit(1)
 
 def watch_add(args):
-    from core.prices import add_to_watchlist
-    t = add_to_watchlist(args.ticker, args.reason)
-    print(f"Watching {t}. Prices are fetched on the next `cli.py prices-refresh`.")
+    from core.prices import add_checked_to_watchlist
+    try:
+        t = add_checked_to_watchlist(args.ticker, args.reason)
+    except ValueError as e:
+        raise SystemExit(str(e))
+    print(f"Watching {t}. Prices are stored; statements come with the next `cli.py fundamentals-refresh`.")
 
 def watch_remove(args):
     from core.prices import remove_from_watchlist

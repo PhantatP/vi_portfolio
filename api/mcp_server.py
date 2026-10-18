@@ -1,17 +1,19 @@
 """
-MCP server for AI agents: read-only tools over the stored data (core/briefs.py). Mounted into the
-FastAPI app in api/main.py, so it shares the API's port: http://<host>:8000/mcp
+MCP server for AI agents: read-only tools over the stored data (core/briefs.py), plus one write tool
+that adds to the watchlist. Mounted into the FastAPI app in api/main.py, so it shares the API's port:
+http://<host>:8000/mcp
 """
 import json
 from typing import Literal
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from core import briefs
+from core import briefs, prices
 
-INSTRUCTIONS = """Read-only data from the user's value-investing portfolio tracker (SQLite, refreshed by
-scheduled jobs; tools never call the market live).
+INSTRUCTIONS = """Data from the user's value-investing portfolio tracker (SQLite, refreshed by
+scheduled jobs; read tools never call the market live).
 - Start with get_portfolio or get_ticker_brief; use get_price_history / get_financials only for detail.
 - Prices are daily closes, split-adjusted but not dividend-adjusted, in the ticker's trading currency.
   Portfolio values are in THB.
@@ -19,12 +21,14 @@ scheduled jobs; tools never call the market live).
   (e.g. TM: USD price, JPY statements). Percentages are plain numbers: 12.3 means 12.3%.
 - P/E uses normalized income (excludes unusual items) when available; pe_reported is shown when it
   differs by more than 10%.
-- Only tracked tickers (held, or on the watchlist) have data. To add one, the user runs
-  `python app/cli.py watch-add TICKER`; data appears after the next refresh.
+- Only tracked tickers (held, or on the watchlist) have data. To track one, call add_to_watchlist
+  (the only write tool); prices are available at once, statements after the weekly refresh.
 - Check get_data_status if freshness matters: prices refresh hourly, statements weekly."""
 
 mcp = MCPServer("vi-portfolio", instructions=INSTRUCTIONS)
 READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
+ADDITIVE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True,
+                           open_world_hint=False)
 
 
 def _json(obj) -> str:
@@ -45,7 +49,7 @@ def get_ticker_brief(ticker: str) -> str:
     brief = briefs.ticker_brief(ticker)
     if brief is None:
         t = ticker.strip().upper()
-        return _json({"error": f"{t} is not tracked. Ask the user to run: python app/cli.py watch-add {t}"})
+        return _json({"error": f"{t} is not tracked. Call add_to_watchlist to track it."})
     return _json(brief)
 
 
@@ -54,6 +58,18 @@ def get_watchlist() -> str:
     """Watched tickers (including benchmark indices) with last price, 1-year return, distance from
     the 52-week high and P/E."""
     return _json(briefs.watchlist_view())
+
+
+@mcp.tool(annotations=ADDITIVE, structured_output=False)
+def add_to_watchlist(ticker: str, reason: str | None = None) -> str:
+    """Track a ticker (Yahoo symbol, e.g. CPALL.BK, AAPL). The symbol is checked with Yahoo and rejected
+    if it has no prices; otherwise its price history is stored at once. Statements appear after the
+    weekly refresh. Re-adding replaces the reason."""
+    try:
+        added = prices.add_checked_to_watchlist(ticker, reason)
+    except ValueError as e:
+        raise ToolError(str(e))  # the SDK hides other exceptions' text from the agent
+    return _json({"added": added, "note": "Prices are stored; statements appear after the weekly refresh."})
 
 
 @mcp.tool(annotations=READ_ONLY, structured_output=False)

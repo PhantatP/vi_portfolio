@@ -8,6 +8,7 @@ import time
 from datetime import date, timedelta
 
 import httpx
+import pandas as pd
 import pytest
 import uvicorn
 from mcp import ClientSession
@@ -16,6 +17,7 @@ from mcp.client.streamable_http import streamable_http_client
 import core.db
 import core.db_init
 import core.portfolio
+import core.prices
 
 
 def _free_port():
@@ -29,6 +31,8 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setattr(core.db, "DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr(core.db_init, "_schema_ready", False)
     monkeypatch.setattr(core.portfolio, "_fetch_live_price", lambda t: pytest.fail(f"live fetch for {t}"))
+    cpall = pd.DataFrame({"Close": [40.0]}, index=pd.DatetimeIndex(["2026-10-01"]))
+    monkeypatch.setattr(core.prices, "_download", lambda tickers, **kw: {t: cpall for t in tickers if t == "CPALL.BK"})
     core.db_init.init_db()
     con = sqlite3.connect(core.db.DB_PATH)
     asset_id = con.execute("INSERT INTO assets (ticker, country) VALUES ('VOO', 'United States') RETURNING id").fetchone()[0]
@@ -68,17 +72,23 @@ async def _session_calls(url, calls):
             return tools, results
 
 
-def test_tools_are_listed_read_only_and_answer_from_the_db(server):
+def test_tools_answer_from_the_db_and_only_add_to_watchlist_writes(server):
     tools, results = asyncio.run(_session_calls(server, [
         ("get_portfolio", {}),
         ("get_ticker_brief", {"ticker": "voo"}),
         ("get_ticker_brief", {"ticker": "NOPE"}),
         ("get_price_history", {"ticker": "VOO", "interval": "yearly"}),
+        ("add_to_watchlist", {"ticker": " cpall.bk ", "reason": "agent pick"}),
+        ("add_to_watchlist", {"ticker": "CPAL.BK"}),
+        ("get_watchlist", {}),
     ]))
     assert {t.name for t in tools.tools} == {"get_portfolio", "get_ticker_brief", "get_watchlist",
-                                             "get_price_history", "get_financials", "get_data_status"}
-    assert all(t.annotations.read_only_hint for t in tools.tools)
-    (p_err, p_text), (b_err, b_text), (_, missing_text), (h_err, h_text) = results
+                                             "get_price_history", "get_financials", "get_data_status",
+                                             "add_to_watchlist"}
+    writers = {t.name for t in tools.tools if not t.annotations.read_only_hint}
+    assert writers == {"add_to_watchlist"}
+    ((p_err, p_text), (b_err, b_text), (_, missing_text), (h_err, h_text), (a_err, a_text),
+     (typo_err, typo_text), (_, w_text)) = results
 
     portfolio = json.loads(p_text)
     assert not p_err
@@ -88,9 +98,17 @@ def test_tools_are_listed_read_only_and_answer_from_the_db(server):
     brief = json.loads(b_text)
     assert not b_err
     assert brief["price"]["last"] == 610.0 and brief["position"]["weight_pct"] == 100.0
-    assert "watch-add NOPE" in json.loads(missing_text)["error"]
+    assert "add_to_watchlist" in json.loads(missing_text)["error"]
 
     assert h_err and "'daily', 'weekly' or 'monthly'" in h_text  # the agent is told the valid values
+
+    assert not a_err and json.loads(a_text)["added"] == "CPALL.BK"
+    con = sqlite3.connect(core.db.DB_PATH)
+    assert con.execute("SELECT reason FROM watchlist WHERE ticker = 'CPALL.BK'").fetchone() == ("agent pick",)
+    assert typo_err and "Yahoo has no prices for CPAL.BK" in typo_text
+    assert con.execute("SELECT COUNT(*) FROM watchlist WHERE ticker = 'CPAL.BK'").fetchone() == (0,)
+    con.close()
+    assert '"last":40.0' in w_text and "CPAL.BK" not in w_text  # prices stored at once, typo never tracked
 
     # the REST API on the same port is untouched by the mount
     # (one test per process: the MCP session manager can only be started once)
